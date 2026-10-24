@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Spotter">
+<meta name="theme-color" content="#0d0f0b">
+<meta name="description" content="Live-Tiererkennung mit Tracking für Safaris in Südafrika. Läuft komplett im Browser auf dem iPhone.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png" type="image/png">
+<title>Safari Spotter</title>
+<style>
+/* Layout: full-bleed camera stage, translucent chrome pinned to the safe-area edges, sheets slide up from the bottom. Single deliberate dark look (camera UI in bright sun). */
+:root {
+  --bg: #0d0f0b;
+  --panel: rgba(16, 19, 13, 0.78);
+  --panel-solid: #15190f;
+  --fg: #f4f0e6;
+  --muted: #b5b0a2;
+  --line: rgba(244, 240, 230, 0.14);
+  --accent: #f0a93a;     /* Sundowner-Amber */
+  --accent-ink: #1a1206;
+  --rec: #e5484d;
+  --ok: #9bd96f;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 14px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.4 var(--font);
+  overflow: hidden; overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button, select, input { font: inherit; color: inherit; }
+button { border: 0; background: none; padding: 0; cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+#app { position: fixed; inset: 0; }
+#viewport { position: absolute; inset: 0; overflow: hidden; background: #000; }
+#stage { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+#cam, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#overlay { pointer-events: none; }
+#recCanvas { position: absolute; left: 0; top: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
+
+/* Top bar */
+.topbar {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 5;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 12px; font-size: 13px; color: var(--fg); max-width: 60vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.pill.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(155, 217, 111, 0.25); }
+.pill .fps { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.lens {
+  appearance: none; -webkit-appearance: none;
+  background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 999px; padding: 7px 30px 7px 12px; font-size: 13px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23f4f0e6' stroke-width='1.8' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 11px center;
+  max-width: 44vw; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Zoom */
+.zoom {
+  position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-50%);
+  z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 999px; padding: 12px 8px;
+}
+.zoom input[type=range] {
+  -webkit-appearance: none; appearance: none; writing-mode: vertical-lr; direction: rtl;
+  width: 28px; height: 34vh; max-height: 260px; background: transparent; margin: 0;
+}
+.zoom input[type=range]::-webkit-slider-runnable-track { width: 4px; background: var(--line); border-radius: 2px; }
+.zoom input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 2px solid var(--accent-ink); margin-left: -11px; }
+.zoom .zv { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--fg); }
+
+/* Bottom bar */
+.bottombar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  padding-top: 14px;
+  padding-left: max(18px, env(safe-area-inset-left, 0px));
+  padding-right: max(18px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(to top, rgba(13, 15, 11, 0.75), rgba(13, 15, 11, 0));
+}
+.sidebtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 46px; padding: 0 14px; border-radius: 999px;
+  background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); font-size: 14px; font-weight: 600;
+}
+.sidebtn.left { justify-self: start; }
+.sidebtn.right { justify-self: end; width: 46px; padding: 0; }
+.badge {
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
+  background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
+}
+.recbtn {
+  width: 74px; height: 74px; border-radius: 50%; border: 4px solid rgba(244, 240, 230, 0.92);
+  display: grid; place-items: center; background: rgba(13, 15, 11, 0.35);
+}
+.recbtn span { width: 58px; height: 58px; border-radius: 50%; background: var(--rec); transition: all .18s ease; }
+.recbtn.on span { width: 28px; height: 28px; border-radius: 7px; }
+.recbtn:disabled { opacity: 0.45; }
+.rectimer {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 5;
+  top: calc(env(safe-area-inset-top, 0px) + 58px);
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(229, 72, 77, 0.92); color: #fff; font-family: var(--mono); font-size: 13px;
+  font-variant-numeric: tabular-nums; padding: 5px 12px; border-radius: 999px;
+}
+.rectimer::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: blink 1s steps(2) infinite; }
+@keyframes blink { to { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .rectimer::before { animation: none; } .recbtn span { transition: none; } }
+
+/* Gate (start screen) */
+.gate {
+  position: absolute; inset: 0; z-index: 20; overflow: auto;
+  background: radial-gradient(120% 80% at 50% 0%, #2a2411 0%, var(--bg) 60%);
+  padding-top: calc(env(safe-area-inset-top, 0px) + 40px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+  padding-left: max(22px, env(safe-area-inset-left, 0px));
+  padding-right: max(22px, env(safe-area-inset-right, 0px));
+}
+.gate-inner { max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 54px; height: 54px; border-radius: 16px; background: var(--accent); display: grid; place-items: center; flex: none; }
+.brand h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; text-wrap: balance; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.card { background: var(--panel-solid); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.card h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.species { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
+.species li { font-size: 13px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
+.species li.weak { color: var(--muted); border-style: dashed; }
+.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 10px; }
+.progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+.prim {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 54px; border-radius: var(--radius);
+  background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 16px;
+}
+.prim:disabled { opacity: 0.5; }
+.ghost { color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.err { border-color: rgba(229, 72, 77, 0.5); color: #ffd9da; }
+.small { font-size: 13px; color: var(--muted); margin: 0; }
+.small b { color: var(--fg); font-weight: 600; }
+
+/* Sheets */
+.scrim { position: absolute; inset: 0; z-index: 30; background: rgba(0, 0, 0, 0.45); }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 31;
+  max-height: 82%; overflow: auto; -webkit-overflow-scrolling: touch;
+  background: var(--panel-solid); border-top-left-radius: 20px; border-top-right-radius: 20px;
+  border-top: 1px solid var(--line);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  padding-top: 10px;
+  padding-left: max(18px, env(safe-area-inset-left, 0px));
+  padding-right: max(18px, env(safe-area-inset-right, 0px));
+}
+.grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 12px; }
+.sheet header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sheet h2 { margin: 0; font-size: 18px; }
+.closebtn { width: 36px; height: 36px; border-radius: 50%; background: var(--line); display: grid; place-items: center; font-size: 18px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.row .lbl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.row .lbl small { color: var(--muted); font-size: 12px; }
+.row select, .row input[type=range] { max-width: 50%; }
+.row select { appearance: none; -webkit-appearance: none; background: var(--line); border: 0; border-radius: 10px; padding: 8px 12px; }
+.row input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--line); width: 46%; }
+.row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); }
+.switch { position: relative; width: 50px; height: 30px; border-radius: 15px; background: var(--line); transition: background .15s; flex: none; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--fg); transition: transform .15s; }
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); }
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); }
+.list li:first-child { border-top: 0; }
+.list .n { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.list .t { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.empty { color: var(--muted); padding: 18px 0; text-align: center; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.actions button { flex: 1 1 140px; min-height: 46px; border-radius: 12px; background: var(--line); font-weight: 600; }
+.actions button.main { background: var(--accent); color: var(--accent-ink); }
+.actions button.danger { color: #ffb3b5; }
+.clip { width: 100%; max-height: 42vh; border-radius: 12px; background: #000; display: block; }
+.version { color: var(--muted); font-size: 12px; text-align: center; margin-top: 16px; font-family: var(--mono); }
+.toast {
+  position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 110px); transform: translateX(-50%);
+  z-index: 40; background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  max-width: calc(100% - 32px); text-align: center;
+}
+</style>
+</head>
+<body>
+<main id="app">
+  <div id="viewport">
+    <div id="stage">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+    </div>
+    <canvas id="recCanvas" aria-hidden="true"></canvas>
+  </div>
+
+  <header class="topbar">
+    <div class="pill" id="status"><span class="dot"></span><span id="statusText">Bereit</span><span class="fps" id="fps"></span></div>
+    <select class="lens" id="lens" aria-label="Objektiv" hidden></select>
+  </header>
+
+  <div class="zoom" id="zoomWrap" hidden>
+    <input type="range" id="zoom" min="1" max="4" step="0.1" value="1" aria-label="Zoom">
+    <span class="zv" id="zoomVal">1,0×</span>
+  </div>
+
+  <div class="rectimer" id="recTimer" hidden>00:00</div>
+
+  <footer class="bottombar">
+    <button class="sidebtn left" id="btnSightings" type="button" aria-label="Sichtungen anzeigen">Sichtungen <span class="badge" id="sightCount">0</span></button>
+    <button class="recbtn" id="btnRecord" type="button" aria-label="Aufnahme starten" disabled><span></span></button>
+    <button class="sidebtn right" id="btnSettings" type="button" aria-label="Einstellungen">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </footer>
+
+  <!-- Start screen -->
+  <section class="gate" id="gate" aria-labelledby="gateTitle">
+    <div class="gate-inner">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#1a1206" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/><path d="M12 9.5v-1M15.5 13h1M12 16.5v1M8.5 13h-1" /></svg>
+        </div>
+        <div>
+          <h1 id="gateTitle">Safari Spotter</h1>
+          <p>Live-Tiererkennung mit Tracking, komplett auf dem Gerät</p>
+        </div>
+      </div>
+
+      <div class="card" id="loadCard">
+        <h2>KI-Modelle</h2>
+        <p class="small" id="loadText">Werden geladen (ca. 33 MB, nur beim ersten Mal). Danach funktioniert die App auch ohne Empfang.</p>
+        <div class="progress" aria-hidden="true"><i id="loadBar"></i></div>
+      </div>
+
+      <div class="card">
+        <h2>Erkennt zuverlässig</h2>
+        <ul class="species">
+          <li>Elefant</li><li>Löwe</li><li>Leopard</li><li>Gepard</li><li>Zebra</li><li>Giraffe</li><li>Flusspferd</li><li>Kaffernbüffel</li><li>Impala</li><li>Springbock</li><li>Kuhantilope</li><li>Warzenschwein</li><li>Hyäne</li><li>Wildhund</li><li>Pavian</li><li>Meerkatze</li><li>Strauss</li><li>Erdmännchen</li><li>Krokodil</li><li>Geier</li><li>Nashornvogel</li>
+        </ul>
+        <p class="small" style="margin-top:12px">Nur geschätzt, mit Fragezeichen: <b>Nashorn</b>, <b>Gnu</b>, <b>Kudu</b>. Diese Arten kennen die Modelle nicht, die App leitet sie aus Form und Kontext ab.</p>
+      </div>
+
+      <div class="card err" id="gateErr" hidden></div>
+
+      <button class="prim" id="btnStart" type="button" disabled>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        <span id="btnStartText">Modelle laden …</span>
+      </button>
+
+      <p class="small"><b>Tipp:</b> In Safari über „Teilen“ zum Home-Bildschirm hinzufügen, dann läuft die App im Vollbild. Für weit entfernte Tiere das Teleobjektiv oben rechts wählen.</p>
+    </div>
+  </section>
+
+  <!-- Scrim + sheets -->
+  <div class="scrim" id="scrim" hidden></div>
+
+  <section class="sheet" id="sheetSightings" hidden aria-label="Sichtungen">
+    <div class="grip"></div>
+    <header><h2>Sichtungen heute</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <ul class="list" id="sightList"></ul>
+    <div class="empty" id="sightEmpty">Noch keine Sichtungen. Sobald ein Tier sicher erkannt wird, landet es hier.</div>
+    <div class="actions">
+      <button type="button" class="main" id="btnShareSight">Liste teilen</button>
+      <button type="button" class="danger" id="btnClearSight">Liste leeren</button>
+    </div>
+  </section>
+
+  <section class="sheet" id="sheetSettings" hidden aria-label="Einstellungen">
+    <div class="grip"></div>
+    <header><h2>Einstellungen</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="row">
+      <div class="lbl">Empfindlichkeit<small id="thrVal">Schwelle 45 %</small></div>
+      <input type="range" id="thr" min="0.25" max="0.75" step="0.05" value="0.45" aria-label="Empfindlichkeit">
+    </div>
+    <div class="row">
+      <div class="lbl">Namen einblenden<small>Art und Sicherheit am Rahmen</small></div>
+      <button type="button" class="switch" id="swLabels" role="switch" aria-checked="true" aria-label="Namen einblenden"></button>
+    </div>
+    <div class="row">
+      <div class="lbl">Rahmen ins Video einbrennen<small>Aus: Aufnahme ohne Overlay, schont den Akku</small></div>
+      <button type="button" class="switch" id="swBurn" role="switch" aria-checked="true" aria-label="Rahmen ins Video einbrennen"></button>
+    </div>
+    <div class="row">
+      <div class="lbl">Erkennungsauflösung<small>Höher erkennt kleinere Tiere, kostet Tempo</small></div>
+      <select id="detWidth" aria-label="Erkennungsauflösung">
+        <option value="320">Schnell</option>
+        <option value="416" selected>Ausgewogen</option>
+        <option value="544">Fein</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="lbl">Kameraauflösung<small>Gilt ab dem nächsten Kamerastart</small></div>
+      <select id="res" aria-label="Kameraauflösung">
+        <option value="720" selected>HD 720p</option>
+        <option value="1080">Full HD 1080p</option>
+      </select>
+    </div>
+    <div class="actions">
+      <button type="button" id="btnReload">Modelle neu laden</button>
+      <button type="button" id="btnStopCam">Kamera beenden</button>
+    </div>
+    <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span></p>
+  </section>
+
+  <section class="sheet" id="sheetClip" hidden aria-label="Aufnahme">
+    <div class="grip"></div>
+    <header><h2>Aufnahme</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <video class="clip" id="clipVideo" controls playsinline></video>
+    <p class="small" id="clipInfo" style="margin-top:10px"></p>
+    <div class="actions">
+      <button type="button" class="main" id="btnShareClip">Teilen / in Fotos sichern</button>
+      <a id="btnSaveClip" class="prim" style="flex:1 1 140px;min-height:46px;border-radius:12px;background:var(--line);color:var(--fg);font-size:15px;text-decoration:none" download>In Dateien speichern</a>
+      <button type="button" class="danger" id="btnDiscardClip">Verwerfen</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+</main>
+
+<script src="vendor/tf.min.js"></script>
+<script src="vendor/coco-ssd.min.js"></script>
+<script src="vendor/mobilenet.min.js"></script>
+<script>
+(() => {
+'use strict';
+const VERSION = '1.0.0';
+const $ = (s) => document.querySelector(s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- Artenwissen ---------- */
+// COCO-Klassen, die als Tier gelten (alles andere wird ignoriert)
+const ANIMAL_COCO = new Set(['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']);
+// COCO-Klassen, die direkt eine Art bedeuten
+const COCO_DIRECT = { elephant: 'Elefant', zebra: 'Zebra', giraffe: 'Giraffe' };
+// Rückfall-Bezeichnung, wenn der Klassifikator nichts Brauchbares liefert
+const COCO_FALLBACK = { bird: 'Vogel', cat: 'Raubkatze?', dog: 'Hundeartiges?', horse: 'Antilope / Zebra?', sheep: 'Antilope?', cow: 'Antilope / Büffel?', elephant: 'Elefant', bear: 'Grosses Tier?', zebra: 'Zebra', giraffe: 'Giraffe' };
+// ImageNet-Klasse (erster Name, klein) -> deutsche Art. Ein "?" markiert eine unsichere Zuordnung.
+const SPECIES = {
+  'african elephant': 'Elefant', 'indian elephant': 'Elefant', 'tusker': 'Elefant',
+  'zebra': 'Zebra', 'arabian camel': 'Giraffe?',
+  'lion': 'Löwe', 'leopard': 'Leopard', 'cheetah': 'Gepard', 'jaguar': 'Leopard?', 'snow leopard': 'Leopard?', 'tiger': 'Raubkatze?',
+  'cougar': 'Karakal?', 'lynx': 'Karakal?', 'egyptian cat': 'Wildkatze?', 'tabby': 'Wildkatze?', 'tiger cat': 'Serval?',
+  'hippopotamus': 'Flusspferd',
+  'water buffalo': 'Kaffernbüffel', 'ox': 'Büffel / Gnu?', 'bison': 'Gnu / Büffel?',
+  'impala': 'Impala', 'gazelle': 'Springbock', 'hartebeest': 'Kuhantilope', 'ibex': 'Kudu?', 'bighorn': 'Antilope?', 'ram': 'Antilope?', 'sorrel': 'Antilope?', 'llama': 'Antilope?',
+  'warthog': 'Warzenschwein', 'wild boar': 'Buschschwein?', 'hog': 'Warzenschwein?',
+  'ostrich': 'Strauss', 'baboon': 'Pavian', 'guenon': 'Meerkatze', 'patas': 'Meerkatze?', 'macaque': 'Affe?', 'langur': 'Affe?', 'colobus': 'Affe?', 'chimpanzee': 'Affe?', 'gorilla': 'Affe?',
+  'hyena': 'Hyäne', 'african hunting dog': 'Wildhund',
+  'coyote': 'Schakal?', 'dingo': 'Schakal?', 'dhole': 'Schakal?', 'red fox': 'Schakal?', 'kit fox': 'Löffelhund?', 'grey fox': 'Schakal?', 'red wolf': 'Schakal?', 'timber wolf': 'Hyäne / Wildhund?',
+  'meerkat': 'Erdmännchen', 'mongoose': 'Manguste', 'badger': 'Honigdachs', 'porcupine': 'Stachelschwein', 'marmot': 'Klippschliefer?', 'guinea pig': 'Klippschliefer?', 'wombat': 'Klippschliefer?', 'hare': 'Hase', 'wood rabbit': 'Hase', 'armadillo': 'Schuppentier?', 'triceratops': 'Nashorn?',
+  'african crocodile': 'Nilkrokodil', 'american alligator': 'Krokodil?', 'komodo dragon': 'Waran', 'agama': 'Agame', 'african chameleon': 'Chamäleon', 'common iguana': 'Echse?', 'rock python': 'Felsenpython', 'green mamba': 'Mamba', 'indian cobra': 'Kobra?', 'boa constrictor': 'Python?',
+  'box turtle': 'Schildkröte', 'terrapin': 'Schildkröte', 'mud turtle': 'Schildkröte', 'leatherback turtle': 'Schildkröte',
+  'vulture': 'Geier', 'kite': 'Milan', 'bald eagle': 'Adler?', 'great grey owl': 'Eule', 'hornbill': 'Nashornvogel', 'bustard': 'Riesentrappe', 'flamingo': 'Flamingo', 'crane': 'Kranich', 'white stork': 'Storch', 'black stork': 'Storch', 'spoonbill': 'Löffler', 'pelican': 'Pelikan', 'goose': 'Nilgans', 'bee eater': 'Bienenfresser', 'african grey': 'Papagei', 'coucal': 'Spornkuckuck', 'bulbul': 'Bülbül', 'partridge': 'Frankolin?', 'prairie chicken': 'Perlhuhn?', 'black grouse': 'Perlhuhn?', 'peacock': 'Perlhuhn?', 'quail': 'Frankolin?', 'little blue heron': 'Reiher', 'american egret': 'Reiher', 'bittern': 'Reiher', 'drake': 'Ente', 'red-breasted merganser': 'Ente', 'black swan': 'Schwan', 'magpie': 'Elster?', 'jay': 'Vogel?'
+};
+const COLORS = ['#f0a93a', '#5ec8f2', '#9be36a', '#f27ab0', '#c9a3ff', '#55e0c8', '#ffd166', '#ff9f6e'];
+
+function speciesFor(className) {
+  const key = String(className).split(',')[0].trim().toLowerCase();
+  return SPECIES[key] || null;
+}
+
+/* ---------- Zustand ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* privat/voll: egal */ } }
+};
+const settings = Object.assign({ threshold: 0.45, labels: true, burnIn: true, detWidth: 416, res: '720' }, store.get('ss.settings', {}));
+let sightings = store.get('ss.sightings', []);
+if (!Array.isArray(sightings)) sightings = [];
+
+const video = $('#cam'), overlay = $('#overlay'), stage = $('#stage'), viewportEl = $('#viewport');
+const octx = overlay.getContext('2d');
+const detCanvas = document.createElement('canvas'); const dctx = detCanvas.getContext('2d');
+const clsCanvas = document.createElement('canvas'); clsCanvas.width = clsCanvas.height = 224; const cctx = clsCanvas.getContext('2d');
+const recCanvas = $('#recCanvas'); const rctx = recCanvas.getContext('2d');
+
+let detector = null, classifier = null, stream = null, running = false, currentDeviceId = null;
+let zoom = 1, hwZoom = null;
+let tracks = [], nextId = 1, detFps = 0;
+let recorder = null, chunks = [], recStart = 0, recTimerId = 0, micStream = null, recMime = '', isRecording = false, recMap = null, lastClip = null;
+let wakeLock = null;
+
+/* ---------- UI-Helfer ---------- */
+function setStatus(text, live) {
+  $('#statusText').textContent = text;
+  $('#status').classList.toggle('live', !!live);
+}
+let toastId = 0;
+function toast(msg, ms = 2200) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastId); toastId = setTimeout(() => { t.hidden = true; }, ms);
+}
+function openSheet(id) { $('#scrim').hidden = false; $(id).hidden = false; }
+function closeSheets() { $('#scrim').hidden = true; document.querySelectorAll('.sheet').forEach((s) => { s.hidden = true; }); }
+$('#scrim').addEventListener('click', closeSheets);
+document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeSheets));
+const fmtTime = (ts) => new Date(ts).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+const fmtZoom = (z) => z.toFixed(1).replace('.', ',') + '×';
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/* ---------- Modelle ---------- */
+const MODEL_FILES = [
+  'models/cocossd/model.json', 'models/cocossd/group1-shard1of5', 'models/cocossd/group1-shard2of5', 'models/cocossd/group1-shard3of5', 'models/cocossd/group1-shard4of5', 'models/cocossd/group1-shard5of5',
+  'models/mobilenet/model.json', 'models/mobilenet/group1-shard1of4.bin', 'models/mobilenet/group1-shard2of4.bin', 'models/mobilenet/group1-shard3of4.bin', 'models/mobilenet/group1-shard4of4.bin'
+];
+async function prefetchModels(onProgress) {
+  let done = 0;
+  await Promise.all(MODEL_FILES.map(async (u) => {
+    const r = await fetch(u);
+    if (!r.ok) throw new Error('Modelldatei fehlt: ' + u);
+    await r.arrayBuffer();
+    done++; onProgress(done / MODEL_FILES.length);
+  }));
+}
+async function loadModels() {
+  const bar = $('#loadBar'), txt = $('#loadText');
+  await tf.ready();
+  try { await tf.setBackend('webgl'); await tf.ready(); } catch (e) { try { await tf.setBackend('cpu'); } catch (e2) { /* bleibt */ } }
+  $('#backend').textContent = tf.getBackend();
+  try {
+    await prefetchModels((p) => { bar.style.width = Math.round(p * 70) + '%'; txt.textContent = 'Lade Modelle … ' + Math.round(p * 100) + ' %'; });
+  } catch (e) {
+    // Ohne Vorabladen weiter: die Bibliotheken holen die Dateien selbst.
+    console.warn(e);
+  }
+  txt.textContent = 'Modelle werden vorbereitet …'; bar.style.width = '80%';
+  const [d, c] = await Promise.all([
+    cocoSsd.load({ base: 'lite_mobilenet_v2', modelUrl: 'models/cocossd/model.json' }),
+    mobilenet.load({ version: 2, alpha: 1.0, modelUrl: 'models/mobilenet/model.json', inputRange: [0, 1] })
+  ]);
+  detector = d; classifier = c;
+  bar.style.width = '100%';
+  txt.textContent = 'Bereit. Erkennung läuft auf ' + (tf.getBackend() === 'webgl' ? 'der GPU' : 'der CPU (langsamer)') + ', nichts verlässt das Gerät.';
+}
+
+/* ---------- Kamera ---------- */
+function stopStream() {
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+async function startCamera(deviceId) {
+  stopStream();
+  const w = settings.res === '1080' ? 1920 : 1280, h = settings.res === '1080' ? 1080 : 720;
+  const vc = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } };
+  Object.assign(vc, { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } });
+  stream = await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) { /* autoplay: Nutzer hat schon geklickt */ }
+  const track = stream.getVideoTracks()[0];
+  const s = track.getSettings ? track.getSettings() : {};
+  currentDeviceId = s.deviceId || deviceId || null;
+  setupZoom(track);
+  await listLenses();
+}
+function lensName(label, i) {
+  const l = (label || '').toLowerCase();
+  if (!label) return 'Kamera ' + (i + 1);
+  if (l.includes('ultra')) return 'Ultraweitwinkel 0,5×';
+  if (l.includes('tele')) return 'Teleobjektiv';
+  if (l.includes('front')) return 'Frontkamera';
+  if (l.includes('dual') || l.includes('triple')) return 'Rückkamera (Auto)';
+  if (l.includes('back') || l.includes('rear') || l.includes('rück')) return 'Rückkamera 1×';
+  return label;
+}
+async function listLenses() {
+  const sel = $('#lens');
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    if (devs.length < 2) { sel.hidden = true; return; }
+    sel.innerHTML = '';
+    devs.forEach((d, i) => {
+      const o = document.createElement('option'); o.value = d.deviceId; o.textContent = lensName(d.label, i);
+      if (d.deviceId === currentDeviceId) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.hidden = false;
+  } catch (e) { sel.hidden = true; }
+}
+$('#lens').addEventListener('change', async (e) => {
+  try { await startCamera(e.target.value); toast(e.target.selectedOptions[0].textContent); }
+  catch (err) { toast('Objektivwechsel fehlgeschlagen'); console.error(err); }
+});
+
+/* Zoom: Hardware-Zoom, wenn Safari ihn freigibt, sonst digital */
+function setupZoom(track) {
+  hwZoom = null; zoom = 1;
+  const slider = $('#zoom');
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps && caps.zoom && caps.zoom.max > caps.zoom.min) {
+      hwZoom = { track, min: caps.zoom.min, max: Math.min(caps.zoom.max, 15), step: caps.zoom.step || 0.1 };
+    }
+  } catch (e) { hwZoom = null; }
+  if (hwZoom) {
+    slider.min = hwZoom.min; slider.max = hwZoom.max; slider.step = hwZoom.step;
+    const s = track.getSettings ? track.getSettings() : {};
+    slider.value = s.zoom || hwZoom.min;
+  } else {
+    slider.min = 1; slider.max = 4; slider.step = 0.1; slider.value = 1;
+  }
+  stage.style.transform = '';
+  $('#zoomVal').textContent = fmtZoom(parseFloat(slider.value));
+  $('#zoomWrap').hidden = false;
+}
+let zoomTimer = 0;
+$('#zoom').addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value);
+  $('#zoomVal').textContent = fmtZoom(v);
+  if (hwZoom) {
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(() => { hwZoom.track.applyConstraints({ advanced: [{ zoom: v }] }).catch(() => {}); }, 40);
+  } else {
+    zoom = v; stage.style.transform = v > 1 ? 'scale(' + v + ')' : '';
+  }
+});
+
+/* Sichtbarer Ausschnitt des Videos (object-fit: cover + Digitalzoom) in Videokoordinaten */
+function visibleRegion() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const W = viewportEl.clientWidth || 1, H = viewportEl.clientHeight || 1;
+  const s = Math.max(W / vw, H / vh);
+  const z = hwZoom ? 1 : zoom;
+  let w = Math.min(vw, W / (s * z)), h = Math.min(vh, H / (s * z));
+  return { x: (vw - w) / 2, y: (vh - h) / 2, w, h, cssScale: s * z };
+}
+function syncCanvases() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return false;
+  if (overlay.width !== vw || overlay.height !== vh) { overlay.width = vw; overlay.height = vh; }
+  return true;
+}
+
+/* ---------- Tracking ---------- */
+function iou(a, b) {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3], bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const iw = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
+  const ih = Math.max(0, Math.min(ay2, by2) - Math.max(a[1], b[1]));
+  const inter = iw * ih, u = a[2] * a[3] + b[2] * b[3] - inter;
+  return u > 0 ? inter / u : 0;
+}
+function updateTracks(dets, now) {
+  const used = new Set();
+  tracks.sort((a, b) => b.hits - a.hits);
+  for (const t of tracks) {
+    let best = -1, bestIou = 0.25;
+    dets.forEach((d, i) => { if (used.has(i)) return; const v = iou(t.box, d.box); if (v > bestIou) { bestIou = v; best = i; } });
+    if (best >= 0) {
+      used.add(best); const d = dets[best]; const a = 0.55;
+      for (let k = 0; k < 4; k++) t.box[k] = t.box[k] * (1 - a) + d.box[k] * a;
+      t.cls = d.cls; t.score = d.score; t.hits++; t.missed = 0; t.lastSeen = now;
+    } else { t.missed++; }
+  }
+  dets.forEach((d, i) => {
+    if (used.has(i)) return;
+    tracks.push({ id: nextId, box: d.box.slice(), cls: d.cls, score: d.score, hits: 1, missed: 0, born: now, lastSeen: now, lastCls: 0, votes: new Map(), species: null, conf: 0, logged: false, color: COLORS[(nextId - 1) % COLORS.length] });
+    nextId++;
+  });
+  tracks = tracks.filter((t) => t.missed <= 10 && (t.hits >= 2 || t.missed <= 2));
+}
+
+/* Artbestimmung pro Track (Ausschnitt -> MobileNet, gewichtete Stimmen über mehrere Durchläufe) */
+async function classifyPending() {
+  const now = performance.now();
+  const cand = tracks
+    .filter((t) => t.missed === 0 && t.hits >= 2 && now - t.lastCls > (t.species ? 900 : 350))
+    .sort((a, b) => a.lastCls - b.lastCls)[0];
+  if (!cand) return;
+  cand.lastCls = now;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const [x, y, w, h] = cand.box;
+  if (w < 12 || h < 12) return;
+  const padF = 0.12;
+  const side = Math.min(Math.max(w, h) * (1 + 2 * padF), vw, vh);
+  let qx = x + w / 2 - side / 2, qy = y + h / 2 - side / 2;
+  qx = Math.max(0, Math.min(qx, vw - side)); qy = Math.max(0, Math.min(qy, vh - side));
+  cctx.drawImage(video, qx, qy, side, side, 0, 0, 224, 224);
+  let res;
+  try { res = await classifier.classify(clsCanvas, 5); } catch (e) { console.error(e); return; }
+  for (const [k, v] of cand.votes) cand.votes.set(k, v * 0.7);
+  let eleP = 0, hippoP = 0;
+  for (const r of res) {
+    const sp = speciesFor(r.className);
+    if (!sp) continue;
+    if (sp === 'Elefant') eleP += r.probability;
+    if (sp === 'Flusspferd') hippoP += r.probability;
+    const weight = sp.endsWith('?') ? 0.8 : 1;
+    cand.votes.set(sp, (cand.votes.get(sp) || 0) + r.probability * weight);
+  }
+  const direct = COCO_DIRECT[cand.cls];
+  let directW = 0.9;
+  // Grosses graues Tier, das der Detektor für einen Elefanten hält, der Klassifikator aber nicht: in Südafrika meist ein Nashorn.
+  if (cand.cls === 'elephant' && eleP < 0.2 && hippoP < 0.3) {
+    cand.votes.set('Nashorn?', (cand.votes.get('Nashorn?') || 0) + 0.6);
+    directW = 0.2;
+  }
+  if (direct) cand.votes.set(direct, (cand.votes.get(direct) || 0) + cand.score * directW);
+  let bestName = null, bestV = 0, total = 0;
+  for (const [k, v] of cand.votes) { total += v; if (v > bestV) { bestV = v; bestName = k; } }
+  if (bestName && bestV >= 0.12) { cand.species = bestName; cand.conf = total > 0 ? bestV / total : 0; }
+  else { cand.species = null; cand.conf = 0; }
+  maybeLog(cand);
+}
+
+/* ---------- Sichtungen ---------- */
+function maybeLog(t) {
+  if (t.logged || !t.species || t.species.endsWith('?')) return;
+  if (t.hits < 4 || performance.now() - t.born < 1200) return;
+  t.logged = true;
+  const now = Date.now();
+  const last = sightings[sightings.length - 1];
+  if (last && last.s === t.species && now - last.t < 30000) { last.n = (last.n || 1) + 1; last.t = now; }
+  else sightings.push({ s: t.species, t: now, n: 1 });
+  store.set('ss.sightings', sightings);
+  renderSightings();
+}
+function renderSightings() {
+  const list = $('#sightList'), empty = $('#sightEmpty');
+  const total = sightings.reduce((a, e) => a + (e.n || 1), 0);
+  $('#sightCount').textContent = String(total);
+  list.innerHTML = '';
+  empty.hidden = sightings.length > 0;
+  [...sightings].reverse().forEach((e) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span'); name.textContent = e.s;
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = (e.n || 1) + '×';
+    const tm = document.createElement('span'); tm.className = 't'; tm.textContent = fmtTime(e.t);
+    li.append(name, n, tm); list.appendChild(li);
+  });
+}
+function sightingsText() {
+  const d = new Date().toLocaleDateString('de-CH');
+  return 'Sichtungen ' + d + '\n' + [...sightings].reverse().map((e) => fmtTime(e.t) + '  ' + e.s + (e.n > 1 ? ' (' + e.n + '×)' : '')).join('\n');
+}
+$('#btnSightings').addEventListener('click', () => { renderSightings(); openSheet('#sheetSightings'); });
+$('#btnShareSight').addEventListener('click', async () => {
+  if (!sightings.length) { toast('Noch keine Sichtungen'); return; }
+  const text = sightingsText();
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Safari Sichtungen', text }); return; }
+    await navigator.clipboard.writeText(text); toast('Liste kopiert');
+  } catch (e) { if (e && e.name !== 'AbortError') toast('Teilen nicht möglich'); }
+});
+$('#btnClearSight').addEventListener('click', () => {
+  sightings = []; store.set('ss.sightings', sightings); tracks.forEach((t) => { t.logged = true; }); renderSightings(); toast('Liste geleert');
+});
+
+/* ---------- Erkennungsschleife ---------- */
+async function detectLoop() {
+  while (running) {
+    if (!syncCanvases() || video.paused) { await sleep(60); continue; }
+    const t0 = performance.now();
+    const reg = visibleRegion();
+    const dw = settings.detWidth, dh = Math.max(32, Math.round(dw * reg.h / reg.w));
+    if (detCanvas.width !== dw || detCanvas.height !== dh) { detCanvas.width = dw; detCanvas.height = dh; }
+    dctx.drawImage(video, reg.x, reg.y, reg.w, reg.h, 0, 0, dw, dh);
+    let preds = [];
+    try { preds = await detector.detect(detCanvas, 8, settings.threshold); }
+    catch (e) { console.error(e); await sleep(250); continue; }
+    const sx = reg.w / dw, sy = reg.h / dh;
+    const dets = preds.filter((p) => ANIMAL_COCO.has(p.class)).map((p) => ({
+      box: [reg.x + p.bbox[0] * sx, reg.y + p.bbox[1] * sy, p.bbox[2] * sx, p.bbox[3] * sy], cls: p.class, score: p.score
+    }));
+    updateTracks(dets, performance.now());
+    await classifyPending();
+    const dt = performance.now() - t0;
+    detFps = detFps * 0.8 + (1000 / Math.max(dt, 1)) * 0.2;
+    if (dt < 70) await sleep(70 - dt);
+  }
+}
+
+/* ---------- Zeichnen ---------- */
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+// map: Videokoordinaten -> Zielkoordinaten; px: Grösse eines CSS-Pixels im Ziel
+function drawOverlay(ctx, map, px) {
+  for (const t of tracks) {
+    if (t.hits < 2) continue;
+    const [x, y, w, h] = t.box;
+    const X = (x - map.ox) * map.k, Y = (y - map.oy) * map.k, W = w * map.k, H = h * map.k;
+    const sure = !!t.species && !t.species.endsWith('?');
+    ctx.lineWidth = 2.2 * px;
+    ctx.strokeStyle = t.color;
+    ctx.setLineDash(sure ? [] : [7 * px, 5 * px]);
+    roundRect(ctx, X, Y, W, H, 10 * px); ctx.stroke();
+    ctx.setLineDash([]);
+    // Ecken betonen
+    const c = Math.min(16 * px, W / 3, H / 3);
+    ctx.lineWidth = 4 * px; ctx.beginPath();
+    ctx.moveTo(X, Y + c); ctx.lineTo(X, Y); ctx.lineTo(X + c, Y);
+    ctx.moveTo(X + W - c, Y); ctx.lineTo(X + W, Y); ctx.lineTo(X + W, Y + c);
+    ctx.moveTo(X + W, Y + H - c); ctx.lineTo(X + W, Y + H); ctx.lineTo(X + W - c, Y + H);
+    ctx.moveTo(X + c, Y + H); ctx.lineTo(X, Y + H); ctx.lineTo(X, Y + H - c);
+    ctx.stroke();
+    if (!settings.labels) continue;
+    const name = t.species || COCO_FALLBACK[t.cls] || 'Tier';
+    const sub = t.species ? Math.round(t.conf * 100) + ' %' : 'unbestimmt';
+    const fs = 14 * px;
+    ctx.font = '600 ' + fs + 'px ' + '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    const tw = ctx.measureText(name).width;
+    ctx.font = '500 ' + (fs * 0.8) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    const sw = ctx.measureText(sub).width;
+    const padX = 8 * px, gap = 7 * px, chipH = fs * 1.9;
+    const chipW = tw + sw + padX * 2 + gap;
+    let cx = X, cy = Y - chipH - 4 * px;
+    if (cy < 0) cy = Y + 4 * px;
+    if (cx + chipW > ctx.canvas.width) cx = Math.max(0, ctx.canvas.width - chipW);
+    ctx.fillStyle = sure ? t.color : 'rgba(13,15,11,0.82)';
+    roundRect(ctx, cx, cy, chipW, chipH, 7 * px); ctx.fill();
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = sure ? '#1a1206' : '#f4f0e6';
+    ctx.font = '600 ' + fs + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(name, cx + padX, cy + chipH / 2);
+    ctx.fillStyle = sure ? 'rgba(26,18,6,0.72)' : '#b5b0a2';
+    ctx.font = '500 ' + (fs * 0.8) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(sub, cx + padX + tw + gap, cy + chipH / 2);
+  }
+}
+let fpsTick = 0;
+function render() {
+  if (!running) return;
+  requestAnimationFrame(render);
+  if (!syncCanvases()) return;
+  const reg = visibleRegion();
+  const px = 1 / reg.cssScale;
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  drawOverlay(octx, { ox: 0, oy: 0, k: 1 }, px);
+  if (isRecording && settings.burnIn && recMap) {
+    const RW = recCanvas.width, RH = recCanvas.height;
+    // Ausschnitt mit festem Seitenverhältnis der Aufnahme
+    let cw = reg.w, ch = cw * RH / RW;
+    if (ch > reg.h) { ch = reg.h; cw = ch * RW / RH; }
+    const cx0 = reg.x + (reg.w - cw) / 2, cy0 = reg.y + (reg.h - ch) / 2;
+    rctx.drawImage(video, cx0, cy0, cw, ch, 0, 0, RW, RH);
+    const k = RW / cw;
+    drawOverlay(rctx, { ox: cx0, oy: cy0, k }, k / reg.cssScale);
+    const fsw = Math.round(RH * 0.028);
+    rctx.font = '500 ' + fsw + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    rctx.textBaseline = 'alphabetic'; rctx.textAlign = 'right';
+    rctx.fillStyle = 'rgba(0,0,0,0.45)'; rctx.fillText(recStamp, RW - fsw + 1, RH - fsw + 1);
+    rctx.fillStyle = 'rgba(244,240,230,0.9)'; rctx.fillText(recStamp, RW - fsw, RH - fsw);
+    rctx.textAlign = 'left';
+  }
+  if (++fpsTick % 15 === 0) {
+    const n = tracks.filter((t) => t.hits >= 2).length;
+    $('#fps').textContent = Math.round(detFps) + ' fps';
+    setStatus(n === 0 ? 'Suche Tiere …' : n === 1 ? '1 Tier im Bild' : n + ' Tiere im Bild', true);
+  }
+}
+let recStamp = '';
+
+/* ---------- Aufnahme ---------- */
+function pickMime() {
+  if (typeof MediaRecorder === 'undefined') return null;
+  const c = ['video/mp4;codecs=avc1', 'video/mp4;codecs=h264', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  return c.find((m) => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || '';
+}
+async function startRecording() {
+  if (!stream || isRecording) return;
+  if (typeof MediaRecorder === 'undefined') { toast('Dieser Browser kann nicht aufnehmen'); return; }
+  chunks = [];
+  const reg = visibleRegion();
+  let ms;
+  if (settings.burnIn) {
+    const RW = Math.min(1280, Math.round(reg.w)) & ~1;
+    const RH = Math.round(RW * reg.h / reg.w) & ~1;
+    recCanvas.width = RW; recCanvas.height = RH; recMap = { RW, RH };
+    rctx.drawImage(video, reg.x, reg.y, reg.w, reg.h, 0, 0, RW, RH);
+    ms = recCanvas.captureStream(30);
+  } else {
+    recMap = null;
+    ms = new MediaStream([stream.getVideoTracks()[0]]);
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micStream.getAudioTracks().forEach((t) => ms.addTrack(t));
+  } catch (e) { micStream = null; }
+  recMime = pickMime();
+  try {
+    recorder = new MediaRecorder(ms, recMime ? { mimeType: recMime, videoBitsPerSecond: 8e6 } : { videoBitsPerSecond: 8e6 });
+  } catch (e) { console.error(e); toast('Aufnahme konnte nicht gestartet werden'); return; }
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = finishRecording;
+  recorder.onerror = (e) => { console.error(e); toast('Aufnahmefehler'); };
+  recStamp = 'Safari Spotter · ' + new Date().toLocaleDateString('de-CH') + ' ' + fmtTime(Date.now());
+  recorder.start(1000);
+  isRecording = true; recStart = Date.now();
+  $('#btnRecord').classList.add('on'); $('#btnRecord').setAttribute('aria-label', 'Aufnahme stoppen');
+  $('#recTimer').hidden = false; $('#recTimer').textContent = '00:00';
+  recTimerId = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $('#recTimer').textContent = pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
+  }, 500);
+}
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  clearInterval(recTimerId);
+  $('#btnRecord').classList.remove('on'); $('#btnRecord').setAttribute('aria-label', 'Aufnahme starten');
+  $('#recTimer').hidden = true;
+  try { recorder.stop(); } catch (e) { finishRecording(); }
+}
+function finishRecording() {
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+  if (!chunks.length) { toast('Keine Aufnahme entstanden'); return; }
+  const type = (recMime && recMime.split(';')[0]) || chunks[0].type || 'video/mp4';
+  const blob = new Blob(chunks, { type });
+  const ext = type.includes('mp4') ? 'mp4' : 'webm';
+  const d = new Date();
+  const name = 'safari-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + '.' + ext;
+  if (lastClip && lastClip.url) URL.revokeObjectURL(lastClip.url);
+  lastClip = { blob, name, type, url: URL.createObjectURL(blob) };
+  const v = $('#clipVideo'); v.src = lastClip.url;
+  const secs = Math.round((Date.now() - recStart) / 1000);
+  $('#clipInfo').textContent = secs + ' s · ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB · ' + ext.toUpperCase();
+  const a = $('#btnSaveClip'); a.href = lastClip.url; a.download = name;
+  openSheet('#sheetClip');
+}
+$('#btnRecord').addEventListener('click', () => { if (isRecording) stopRecording(); else startRecording(); });
+$('#btnShareClip').addEventListener('click', async () => {
+  if (!lastClip) return;
+  const file = new File([lastClip.blob], lastClip.name, { type: lastClip.type });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Safari Aufnahme' }); return; }
+    toast('Teilen nicht möglich, bitte „In Dateien speichern“');
+  } catch (e) { if (e && e.name !== 'AbortError') toast('Teilen abgebrochen'); }
+});
+$('#btnDiscardClip').addEventListener('click', () => {
+  if (lastClip && lastClip.url) URL.revokeObjectURL(lastClip.url);
+  lastClip = null; $('#clipVideo').removeAttribute('src'); closeSheets();
+});
+
+/* ---------- Einstellungen ---------- */
+function bindSettings() {
+  const thr = $('#thr'); thr.value = settings.threshold;
+  $('#thrVal').textContent = 'Schwelle ' + Math.round(settings.threshold * 100) + ' %';
+  thr.addEventListener('input', () => { settings.threshold = parseFloat(thr.value); $('#thrVal').textContent = 'Schwelle ' + Math.round(settings.threshold * 100) + ' %'; store.set('ss.settings', settings); });
+  const sw = (id, key) => {
+    const el = $(id); el.setAttribute('aria-checked', String(!!settings[key]));
+    el.addEventListener('click', () => { settings[key] = !settings[key]; el.setAttribute('aria-checked', String(settings[key])); store.set('ss.settings', settings); });
+  };
+  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn');
+  const dw = $('#detWidth'); dw.value = String(settings.detWidth);
+  dw.addEventListener('change', () => { settings.detWidth = parseInt(dw.value, 10) || 416; store.set('ss.settings', settings); });
+  const res = $('#res'); res.value = settings.res;
+  res.addEventListener('change', () => { settings.res = res.value; store.set('ss.settings', settings); toast('Gilt ab dem nächsten Kamerastart'); });
+  $('#ver').textContent = 'v' + VERSION;
+  $('#btnSettings').addEventListener('click', () => openSheet('#sheetSettings'));
+  $('#btnReload').addEventListener('click', async () => {
+    try {
+      if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); }
+      if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); }
+    } catch (e) { /* egal */ }
+    location.reload();
+  });
+  $('#btnStopCam').addEventListener('click', () => { stopAll(); closeSheets(); });
+}
+
+/* ---------- Start / Stopp ---------- */
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && running) { keepAwake(); video.play().catch(() => {}); }
+});
+function showGateError(msg) {
+  const e = $('#gateErr'); e.textContent = msg; e.hidden = false;
+}
+async function startAll() {
+  $('#gateErr').hidden = true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showGateError('Dieser Browser gibt die Kamera nicht frei. Bitte die Seite direkt in Safari öffnen (nicht in einer App-Vorschau).');
+    return;
+  }
+  $('#btnStart').disabled = true; $('#btnStartText').textContent = 'Kamera wird gestartet …';
+  try {
+    await startCamera(null);
+  } catch (e) {
+    console.error(e);
+    $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
+    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    showGateError(denied
+      ? 'Kamerazugriff abgelehnt. In Safari: „aA“ links in der Adresszeile tippen, Website-Einstellungen, Kamera erlauben. Dann erneut starten.'
+      : 'Kamera nicht verfügbar (' + (e && e.name ? e.name : 'Fehler') + '). Läuft sie gerade in einer anderen App?');
+    return;
+  }
+  running = true;
+  $('#gate').hidden = true;
+  $('#btnRecord').disabled = false;
+  setStatus('Suche Tiere …', true);
+  keepAwake();
+  requestAnimationFrame(render);
+  detectLoop();
+}
+function stopAll() {
+  if (isRecording) stopRecording();
+  running = false;
+  stopStream();
+  tracks = [];
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  $('#btnRecord').disabled = true;
+  $('#zoomWrap').hidden = true; $('#lens').hidden = true;
+  setStatus('Bereit', false); $('#fps').textContent = '';
+  $('#gate').hidden = false;
+  $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
+  if (wakeLock) { try { wakeLock.release(); } catch (e) { /* egal */ } wakeLock = null; }
+}
+$('#btnStart').addEventListener('click', startAll);
+window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); });
+
+/* ---------- Hochfahren ---------- */
+bindSettings();
+renderSightings();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+(async () => {
+  try {
+    await loadModels();
+    $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
+  } catch (e) {
+    console.error(e);
+    $('#loadText').textContent = 'Modelle konnten nicht geladen werden. Internetverbindung prüfen und die Seite neu laden.';
+    showGateError('Fehler beim Laden der KI-Modelle: ' + (e && e.message ? e.message : e));
+    $('#btnStartText').textContent = 'Modelle fehlen';
+  }
+})();
+})();
+</script>
+</body>
+</html>
