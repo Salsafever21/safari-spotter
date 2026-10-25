@@ -61,6 +61,13 @@ model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy
   }
   model.setWeights(bestWeights);
   console.log('beste Validierungsgenauigkeit:', best.toFixed(3));
+  const valFar = valIdx.filter((i) => items[i].variant === 4);
+  if (valFar.length) {
+    const vf = tensors(valFar); const yf = tf.oneHot(vf.y, classes.length);
+    const evf = model.evaluate(vf.x, yf, { batchSize: 512 });
+    console.log('Genauigkeit auf Fern-Variante (72 px):', (await evf[1].data())[0].toFixed(3), 'auf', valFar.length, 'Fotos');
+    evf.forEach((t) => t.dispose()); vf.x.dispose(); vf.y.dispose(); yf.dispose();
+  }
 
   // Verwechslungen und Top-3
   const probs = model.predict(va.x, { batchSize: 512 });
@@ -84,11 +91,12 @@ model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy
   Object.entries(conf).sort((a, b) => b[1] - a[1]).slice(0, 15).forEach(([k, n]) => console.log('  ', k, n));
 
   // Export
-  const outDir = path.join(SITE, 'models', 'head', '1.1.0');
+  const HEAD_VERSION = process.env.HEAD_VERSION || '1.2.1';
+  const outDir = path.join(SITE, 'models', 'head', HEAD_VERSION);
   fs.mkdirSync(outDir, { recursive: true });
   await model.save('file://' + outDir);
   const meta = {
-    version: '1.1.0', dim, trained: new Date().toISOString().slice(0, 10),
+    version: HEAD_VERSION, dim, trained: new Date().toISOString().slice(0, 10),
     valTop1: Math.round(top1 / p.length * 1000) / 10, valGroup: Math.round(gOk / p.length * 1000) / 10, valPhotos: p.length,
     classes: spec.classes.map((c) => ({ key: c.key, name: c.name, group: c.group || null, negative: !!c.negative, taxon: c.taxon }))
   };

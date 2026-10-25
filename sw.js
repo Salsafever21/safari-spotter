@@ -1,5 +1,5 @@
 /* Safari Spotter Service Worker: App-Hülle vorab cachen, Modelle beim ersten Laden dauerhaft ablegen. */
-const APP_CACHE = 'spotter-app-v1.2.0';
+const APP_CACHE = 'spotter-app-v1.2.1';
 const MODEL_CACHE = 'spotter-models-v1';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
