@@ -261,16 +261,16 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
       <div class="card" id="loadCard">
         <h2>KI-Modelle</h2>
-        <p class="small" id="loadText">Werden geladen (ca. 33 MB, nur beim ersten Mal). Danach funktioniert die App auch ohne Empfang.</p>
+        <p class="small" id="loadText">Werden geladen (ca. 35 MB, nur beim ersten Mal). Danach funktioniert die App auch ohne Empfang.</p>
         <div class="progress" aria-hidden="true"><i id="loadBar"></i></div>
       </div>
 
       <div class="card">
-        <h2>Erkennt zuverlässig</h2>
-        <ul class="species">
+        <h2 id="speciesTitle">Erkennt zuverlässig</h2>
+        <ul class="species" id="speciesList">
           <li>Elefant</li><li>Löwe</li><li>Leopard</li><li>Gepard</li><li>Zebra</li><li>Giraffe</li><li>Flusspferd</li><li>Kaffernbüffel</li><li>Impala</li><li>Springbock</li><li>Kuhantilope</li><li>Warzenschwein</li><li>Hyäne</li><li>Wildhund</li><li>Pavian</li><li>Meerkatze</li><li>Strauss</li><li>Erdmännchen</li><li>Krokodil</li><li>Geier</li><li>Nashornvogel</li>
         </ul>
-        <p class="small" style="margin-top:12px">Nur geschätzt, mit Fragezeichen: <b>Nashorn</b>, <b>Gnu</b>, <b>Kudu</b>. Diese Arten kennen die Modelle nicht, die App leitet sie aus Form und Kontext ab.</p>
+        <p class="small" style="margin-top:12px" id="speciesNote">Nur geschätzt, mit Fragezeichen: <b>Nashorn</b>, <b>Gnu</b>, <b>Kudu</b>. Diese Arten kennen die Modelle nicht, die App leitet sie aus Form und Kontext ab.</p>
       </div>
 
       <div class="card err" id="gateErr" hidden></div>
@@ -356,7 +356,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 <script>
 (() => {
 'use strict';
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+const HEAD_DIR = 'models/head/1.1.0/';
 const $ = (s) => document.querySelector(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -407,7 +408,8 @@ const detCanvas = document.createElement('canvas'); const dctx = detCanvas.getCo
 const clsCanvas = document.createElement('canvas'); clsCanvas.width = clsCanvas.height = 224; const cctx = clsCanvas.getContext('2d');
 const recCanvas = $('#recCanvas'); const rctx = recCanvas.getContext('2d');
 
-let detector = null, classifier = null, stream = null, running = false, currentDeviceId = null;
+let detector = null, classifier = null, head = null, headMeta = null, stream = null, running = false, currentDeviceId = null;
+let hint = null, hintRuns = [], lastHintAt = 0;
 let zoom = 1, hwZoom = null;
 let tracks = [], nextId = 1, detFps = 0;
 let recorder = null, chunks = [], recStart = 0, recTimerId = 0, micStream = null, recMime = '', isRecording = false, recMap = null, lastClip = null;
@@ -434,7 +436,8 @@ const pad2 = (n) => String(n).padStart(2, '0');
 /* ---------- Modelle ---------- */
 const MODEL_FILES = [
   'models/cocossd/model.json', 'models/cocossd/group1-shard1of5', 'models/cocossd/group1-shard2of5', 'models/cocossd/group1-shard3of5', 'models/cocossd/group1-shard4of5', 'models/cocossd/group1-shard5of5',
-  'models/mobilenet/model.json', 'models/mobilenet/group1-shard1of4.bin', 'models/mobilenet/group1-shard2of4.bin', 'models/mobilenet/group1-shard3of4.bin', 'models/mobilenet/group1-shard4of4.bin'
+  'models/mobilenet/model.json', 'models/mobilenet/group1-shard1of4.bin', 'models/mobilenet/group1-shard2of4.bin', 'models/mobilenet/group1-shard3of4.bin', 'models/mobilenet/group1-shard4of4.bin',
+  HEAD_DIR + 'model.json', HEAD_DIR + 'weights.bin', HEAD_DIR + 'classes.json'
 ];
 async function prefetchModels(onProgress) {
   let done = 0;
@@ -457,13 +460,30 @@ async function loadModels() {
     console.warn(e);
   }
   txt.textContent = 'Modelle werden vorbereitet …'; bar.style.width = '80%';
-  const [d, c] = await Promise.all([
+  const [d, c, h, meta] = await Promise.all([
     cocoSsd.load({ base: 'lite_mobilenet_v2', modelUrl: 'models/cocossd/model.json' }),
-    mobilenet.load({ version: 2, alpha: 1.0, modelUrl: 'models/mobilenet/model.json', inputRange: [0, 1] })
+    mobilenet.load({ version: 2, alpha: 1.0, modelUrl: 'models/mobilenet/model.json', inputRange: [0, 1] }),
+    tf.loadLayersModel(HEAD_DIR + 'model.json').catch((e) => { console.warn('Artenkopf fehlt, nutze ImageNet-Zuordnung', e); return null; }),
+    fetch(HEAD_DIR + 'classes.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)
   ]);
   detector = d; classifier = c;
+  if (h && meta && meta.classes && meta.classes.length === h.outputs[0].shape[1]) {
+    head = h; headMeta = meta;
+    // Aufwärmen, damit der erste echte Durchlauf nicht ruckelt
+    tf.tidy(() => head.predict(tf.zeros([1, meta.dim || 1280])));
+  }
+  renderSpeciesList();
   bar.style.width = '100%';
   txt.textContent = 'Bereit. Erkennung läuft auf ' + (tf.getBackend() === 'webgl' ? 'der GPU' : 'der CPU (langsamer)') + ', nichts verlässt das Gerät.';
+}
+function renderSpeciesList() {
+  const ul = $('#speciesList'), h2 = $('#speciesTitle'), note = $('#speciesNote');
+  if (!headMeta) return;
+  const shown = headMeta.classes.filter((c) => !c.negative);
+  ul.innerHTML = '';
+  shown.forEach((c) => { const li = document.createElement('li'); li.textContent = c.name; ul.appendChild(li); });
+  h2.textContent = 'Erkennt ' + shown.length + ' Arten';
+  note.innerHTML = 'Eigenes Modell, trainiert mit Fotos aus iNaturalist (Stand ' + (headMeta.trained || '') + '). Im Test ' + headMeta.valTop1 + ' % richtige Art auf ' + headMeta.valPhotos + ' ungesehenen Fotos. Bei knapper Entscheidung zeigt die App den Sammelnamen (z.&nbsp;B. <b>Nashorn</b>, <b>Löwe</b>).';
 }
 
 /* ---------- Kamera ---------- */
@@ -606,6 +626,16 @@ async function classifyPending() {
   let qx = x + w / 2 - side / 2, qy = y + h / 2 - side / 2;
   qx = Math.max(0, Math.min(qx, vw - side)); qy = Math.max(0, Math.min(qy, vh - side));
   cctx.drawImage(video, qx, qy, side, side, 0, 0, 224, 224);
+  if (head) {
+    const r = await runHead(clsCanvas);
+    if (!r) return;
+    const p = r.probs;
+    cand.probs = cand.probs ? cand.probs.map((v, i) => v * 0.6 + p[i] * 0.4) : p;
+    const d = decideSpecies(cand.probs);
+    cand.species = d.name; cand.conf = d.conf; cand.other = d.other; cand.sure = d.sure;
+    if (d.sure) maybeLog(cand);
+    return;
+  }
   let res;
   try { res = await classifier.classify(clsCanvas, 5); } catch (e) { console.error(e); return; }
   for (const [k, v] of cand.votes) cand.votes.set(k, v * 0.7);
@@ -630,18 +660,77 @@ async function classifyPending() {
   for (const [k, v] of cand.votes) { total += v; if (v > bestV) { bestV = v; bestName = k; } }
   if (bestName && bestV >= 0.12) { cand.species = bestName; cand.conf = total > 0 ? bestV / total : 0; }
   else { cand.species = null; cand.conf = 0; }
-  maybeLog(cand);
+  cand.sure = !!cand.species && !cand.species.endsWith('?');
+  if (cand.sure) maybeLog(cand);
+}
+
+/* Artenkopf: Embedding aus demselben MobileNet, dann kleiner Klassifikator */
+async function runHead(canvas) {
+  let out;
+  try {
+    out = tf.tidy(() => head.predict(classifier.infer(canvas, true)));
+    const probs = Array.from(await out.data());
+    return { probs };
+  } catch (e) { console.error(e); return null; }
+  finally { if (out) out.dispose(); }
+}
+// Entscheidet aus den (geglätteten) Wahrscheinlichkeiten, was angezeigt wird.
+function decideSpecies(probs) {
+  const cls = headMeta.classes;
+  const order = probs.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]);
+  const [p1, i1] = order[0], [p2, i2] = order[1];
+  const c1 = cls[i1], c2 = cls[i2];
+  if (c1.negative) {
+    // Haustier oder Ähnliches: kein Safari-Tier, aber als Tier markieren
+    return { name: 'Anderes Tier', conf: p1, sure: false, other: true };
+  }
+  // Sammelname, wenn zwei Klassen derselben Gruppe sich den Spitzenplatz teilen
+  if (c1.group && c2.group === c1.group && p1 - p2 < 0.3) {
+    return { name: c1.group, conf: p1 + p2, sure: p1 + p2 >= 0.55, other: false };
+  }
+  // Zu unsicher für einen Artnamen: nur der grobe Detektor-Hinweis bleibt
+  if (p1 < 0.35) return { name: null, conf: p1, sure: false, other: false };
+  return { name: c1.name, conf: p1, sure: p1 >= 0.55, other: false };
+}
+
+/* Hinweis ohne Rahmen: wenn der Detektor nichts findet, wird die Bildmitte geprüft (Krokodil, Schildkröte, Waran, Schliefer) */
+async function idleHint(now) {
+  if (!head) return;
+  const active = tracks.some((t) => t.hits >= 2 && t.missed === 0);
+  if (active) { hintRuns = []; if (hint && now > hint.until) hint = null; return; }
+  if (now - lastHintAt < 700) return;
+  lastHintAt = now;
+  const reg = visibleRegion();
+  const side = Math.min(reg.w, reg.h) * 0.7;
+  cctx.drawImage(video, reg.x + (reg.w - side) / 2, reg.y + (reg.h - side) / 2, side, side, 0, 0, 224, 224);
+  const r = await runHead(clsCanvas);
+  if (!r) return;
+  const d = decideSpecies(r.probs);
+  hintRuns.push(d); if (hintRuns.length > 4) hintRuns.shift();
+  const same = d.name ? hintRuns.filter((x) => x.name === d.name && !x.other && x.conf >= 0.6).length : 0;
+  if (same >= 2 && !d.other) {
+    hint = { name: d.name, conf: d.conf, until: now + 1800 };
+    if (same >= 4 && d.conf >= 0.7) logSighting(d.name, true);
+  } else if (hint && now > hint.until) hint = null;
 }
 
 /* ---------- Sichtungen ---------- */
 function maybeLog(t) {
-  if (t.logged || !t.species || t.species.endsWith('?')) return;
+  if (t.logged || !t.species || !t.sure || t.other) return;
   if (t.hits < 4 || performance.now() - t.born < 1200) return;
   t.logged = true;
+  logSighting(t.species);
+}
+let lastHintLog = { name: '', t: 0 };
+function logSighting(name, fromHint) {
   const now = Date.now();
+  if (fromHint) {
+    if (lastHintLog.name === name && now - lastHintLog.t < 60000) return;
+    lastHintLog = { name, t: now };
+  }
   const last = sightings[sightings.length - 1];
-  if (last && last.s === t.species && now - last.t < 30000) { last.n = (last.n || 1) + 1; last.t = now; }
-  else sightings.push({ s: t.species, t: now, n: 1 });
+  if (last && last.s === name && now - last.t < 30000) { last.n = (last.n || 1) + 1; last.t = now; }
+  else sightings.push({ s: name, t: now, n: 1 });
   store.set('ss.sightings', sightings);
   renderSightings();
 }
@@ -694,6 +783,7 @@ async function detectLoop() {
     }));
     updateTracks(dets, performance.now());
     await classifyPending();
+    await idleHint(performance.now());
     const dt = performance.now() - t0;
     detFps = detFps * 0.8 + (1000 / Math.max(dt, 1)) * 0.2;
     if (dt < 70) await sleep(70 - dt);
@@ -713,7 +803,7 @@ function drawOverlay(ctx, map, px) {
     if (t.hits < 2) continue;
     const [x, y, w, h] = t.box;
     const X = (x - map.ox) * map.k, Y = (y - map.oy) * map.k, W = w * map.k, H = h * map.k;
-    const sure = !!t.species && !t.species.endsWith('?');
+    const sure = !!t.sure;
     ctx.lineWidth = 2.2 * px;
     ctx.strokeStyle = t.color;
     ctx.setLineDash(sure ? [] : [7 * px, 5 * px]);
@@ -728,8 +818,8 @@ function drawOverlay(ctx, map, px) {
     ctx.moveTo(X + c, Y + H); ctx.lineTo(X, Y + H); ctx.lineTo(X, Y + H - c);
     ctx.stroke();
     if (!settings.labels) continue;
-    const name = t.species || COCO_FALLBACK[t.cls] || 'Tier';
-    const sub = t.species ? Math.round(t.conf * 100) + ' %' : 'unbestimmt';
+    const name = t.species ? (t.sure || t.other || t.species.endsWith('?') ? t.species : t.species + '?') : (COCO_FALLBACK[t.cls] || 'Tier');
+    const sub = t.other ? 'kein Safari-Tier' : t.species ? Math.round(Math.min(t.conf, 0.99) * 100) + ' %' : 'unbestimmt';
     const fs = 14 * px;
     ctx.font = '600 ' + fs + 'px ' + '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
     const tw = ctx.measureText(name).width;
@@ -750,6 +840,20 @@ function drawOverlay(ctx, map, px) {
     ctx.font = '500 ' + (fs * 0.8) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
     ctx.fillText(sub, cx + padX + tw + gap, cy + chipH / 2);
   }
+  // Hinweis ohne Rahmen (Bildmitte)
+  if (hint && settings.labels && performance.now() < hint.until) {
+    const fs = 15 * px;
+    const label = hint.name + '  ' + Math.round(Math.min(hint.conf, 0.99) * 100) + ' %';
+    ctx.font = '600 ' + fs + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+    const tw = ctx.measureText(label).width, padX = 12 * px, chipH = fs * 2.1, chipW = tw + padX * 2;
+    const cw = map.w || ctx.canvas.width, ch = map.h || ctx.canvas.height;
+    const cx = (map.x0 || 0) + (cw - chipW) / 2, cy = (map.y0 || 0) + ch * 0.62;
+    ctx.fillStyle = 'rgba(13,15,11,0.82)';
+    roundRect(ctx, cx, cy, chipW, chipH, 9 * px); ctx.fill();
+    ctx.strokeStyle = '#f0a93a'; ctx.lineWidth = 1.5 * px; ctx.stroke();
+    ctx.fillStyle = '#f4f0e6'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx + padX, cy + chipH / 2);
+  }
 }
 let fpsTick = 0;
 function render() {
@@ -759,7 +863,7 @@ function render() {
   const reg = visibleRegion();
   const px = 1 / reg.cssScale;
   octx.clearRect(0, 0, overlay.width, overlay.height);
-  drawOverlay(octx, { ox: 0, oy: 0, k: 1 }, px);
+  drawOverlay(octx, { ox: 0, oy: 0, k: 1, x0: reg.x, y0: reg.y, w: reg.w, h: reg.h }, px);
   if (isRecording && settings.burnIn && recMap) {
     const RW = recCanvas.width, RH = recCanvas.height;
     // Ausschnitt mit festem Seitenverhältnis der Aufnahme
@@ -768,7 +872,7 @@ function render() {
     const cx0 = reg.x + (reg.w - cw) / 2, cy0 = reg.y + (reg.h - ch) / 2;
     rctx.drawImage(video, cx0, cy0, cw, ch, 0, 0, RW, RH);
     const k = RW / cw;
-    drawOverlay(rctx, { ox: cx0, oy: cy0, k }, k / reg.cssScale);
+    drawOverlay(rctx, { ox: cx0, oy: cy0, k, x0: 0, y0: 0, w: RW, h: RH }, k / reg.cssScale);
     const fsw = Math.round(RH * 0.028);
     rctx.font = '500 ' + fsw + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
     rctx.textBaseline = 'alphabetic'; rctx.textAlign = 'right';
@@ -779,7 +883,8 @@ function render() {
   if (++fpsTick % 15 === 0) {
     const n = tracks.filter((t) => t.hits >= 2).length;
     $('#fps').textContent = Math.round(detFps) + ' fps';
-    setStatus(n === 0 ? 'Suche Tiere …' : n === 1 ? '1 Tier im Bild' : n + ' Tiere im Bild', true);
+    const hinting = n === 0 && hint && performance.now() < hint.until;
+    setStatus(hinting ? hint.name + ' vermutet' : n === 0 ? 'Suche Tiere …' : n === 1 ? '1 Tier im Bild' : n + ' Tiere im Bild', true);
   }
 }
 let recStamp = '';
@@ -944,6 +1049,7 @@ $('#btnStart').addEventListener('click', startAll);
 window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); });
 
 /* ---------- Hochfahren ---------- */
+window.__spotter = { state: () => ({ version: VERSION, head: !!head, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits })), hint, hintRuns: hintRuns.slice(), detFps }) };
 bindSettings();
 renderSightings();
 if ('serviceWorker' in navigator) {

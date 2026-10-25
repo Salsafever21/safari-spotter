@@ -1,0 +1,16 @@
+{
+  "name": "safari-spotter-training",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Trainingspipeline für den Artenkopf des Safari Spotters",
+  "scripts": {
+    "download": "python3 download.py",
+    "embed": "node embed.js",
+    "train": "node train.js"
+  },
+  "dependencies": {
+    "@tensorflow-models/mobilenet": "2.1.1",
+    "@tensorflow/tfjs": "4.22.0",
+    "@tensorflow/tfjs-node": "4.22.0"
+  }
+}
