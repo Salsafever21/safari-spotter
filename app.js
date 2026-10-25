@@ -376,7 +376,8 @@ function tripStats(tr) {
     const d = haversine({ lat: a[1], lon: a[2] }, { lat: b[1], lon: b[2] });
     const v = d / (dt / 1000);
     const gpsV = b[3] >= 0 ? b[3] : -1;
-    const speed = gpsV >= 0 ? gpsV : v;
+    // GPS-Tempo bevorzugen, ausser der Ort ändert sich über längere Zeit nicht (dann steht das Fahrzeug, egal was der Empfänger meldet)
+    const speed = (gpsV >= 0 && !(d < 5 && dt > 10000)) ? gpsV : v;
     if (speed < STILL_SPEED) {
       st.standing += dt;
       if (stillSince == null) { stillSince = a[0]; stillLat = a[1]; stillLon = a[2]; }
@@ -1555,7 +1556,7 @@ window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); st
 window.__spotter = {
   state: () => ({ version: VERSION, head: !!head, photoCount, tracking, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
   fakeFix: (lat, lon, acc = 8, spd, alt) => onFix({ coords: { latitude: lat, longitude: lon, accuracy: acc, speed: spd, altitude: alt } }),
-  injectTrack: (points) => { if (!trip.active) return false; trip.points = points.slice(); trip.dist = 0; for (let i = 1; i < points.length; i++) { const d = haversine({ lat: points[i - 1][1], lon: points[i - 1][2] }, { lat: points[i][1], lon: points[i][2] }); if (d >= 10 && d < 2000) trip.dist += d; } store.set('ss.trip', trip); updateDriveLive(); return true; },
+  injectTrack: (points) => { if (!trip.active) return false; trip.points = points.slice(); trip.dist = 0; if (points.length && points[0][0] < trip.startedAt) trip.startedAt = points[0][0] - 5000; for (let i = 1; i < points.length; i++) { const d = haversine({ lat: points[i - 1][1], lon: points[i - 1][2] }, { lat: points[i][1], lon: points[i][2] }); if (d >= 10 && d < 2000) trip.dist += d; } store.set('ss.trip', trip); updateDriveLive(); return true; },
   analyzeFiles, logSighting, startTrip, stopTrip, setTracking, tripStats: () => tripStats(trip.active ? trip : (trips[0] || { points: [], startedAt: 0 })), exportRows: () => exportRows(), coarsen, snapshot: snapshotFrame, photos: () => idb.all('photos'), withExif, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
   dbg: { renameSighting, renderSightings, addCorrection, labelName, closeTop, toast, isSensitive, store, tracks: () => tracks, lockTrack: (i, name, key) => { const t = tracks[i]; t.locked = true; t.species = name; t.key = key; t.sure = true; t.other = false; t.conf = 1; return t.sightId; } }
 };
