@@ -11,7 +11,8 @@ Live-Tiererkennung mit Tracking für Safaris in Südafrika. Läuft komplett im B
 - Korrektur-Loop: Tipp auf einen Rahmen korrigiert die Art, unsichere Treffer landen in einer Prüfliste, Export als JSON für das Nachtraining
 - Bilder aus der Mediathek analysieren (mit EXIF-Standort), Foto-Modus aus der Kamera
 - Zählung pro Art, Big-Five-Checkliste, Anzahl je Sichtung manuell anpassbar
-- GPS-Fahrtaufzeichnung mit Kilometern, Karte (Leaflet/OSM), Export als GPX und CSV
+- GPS-Fahrtaufzeichnung mit Kilometern, Karte (Leaflet/OSM) mit Route, Bildmarkern und Sichtungen, Export als GPX und CSV
+- Fotos auf dem Gerät: Schnappschuss bei jeder neuen Sichtung, Foto-Modus, analysierte Bilder; Galerie mit Vollbild-Viewer; „In Fotos sichern“ schreibt EXIF (Datum, GPS, Artnamen), damit die Bilder in der Fotos-App auf der Orte-Karte erscheinen
 - Artenschutz: Nashorn-Standorte nur auf ein 10-km-Raster, Zeit in Exporten auf die Stunde gerundet, Fahrtspur rund um Nashorn-Sichtungen ausgeblendet
 - Region als Vorwissen (GPS oder manuell), Artensteckbriefe offline
 - Sammelnamen bei knapper Entscheidung (Nashorn, Löwe), Hinweis ohne Rahmen für Tiere, die der Detektor nicht einrahmt (Krokodil, Schildkröte, Waran)
@@ -29,4 +30,4 @@ node train.js                  # Kopf trainieren, Bericht in report.json, Export
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
 
-Version: 1.3.1
+Version: 1.4.0
