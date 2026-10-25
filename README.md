@@ -7,6 +7,7 @@ Live-Tiererkennung mit Tracking für Safaris in Südafrika. Läuft komplett im B
 - Aufnahme mit eingebranntem Overlay (MP4 in Safari), Teilen in Fotos oder in Dateien speichern
 - Sichtungsliste des Tages, teilbar
 - Offline nach dem ersten Laden (Service Worker, Modelle lokal gecacht)
+- Fernerkennung: das Bild wird zusätzlich in Kacheln abgesucht (der Detektor rechnet intern mit 300×300 Pixeln), schwache Kandidaten bestätigt der Artenkopf
 - Sammelnamen bei knapper Entscheidung (Nashorn, Löwe), Hinweis ohne Rahmen für Tiere, die der Detektor nicht einrahmt (Krokodil, Schildkröte, Waran)
 
 Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanifest`, `vendor/` (TensorFlow.js 4.22, coco-ssd 2.2.3, mobilenet 2.1.1), `models/` (COCO-SSD lite, MobileNet v2, Artenkopf unter `models/head/<version>/`).
@@ -22,4 +23,4 @@ node train.js                  # Kopf trainieren, Bericht in report.json, Export
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
 
-Version: 1.1.0
+Version: 1.2.0

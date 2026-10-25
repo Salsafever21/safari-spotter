@@ -314,11 +314,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <button type="button" class="switch" id="swBurn" role="switch" aria-checked="true" aria-label="Rahmen ins Video einbrennen"></button>
     </div>
     <div class="row">
-      <div class="lbl">Erkennungsauflösung<small>Höher erkennt kleinere Tiere, kostet Tempo</small></div>
-      <select id="detWidth" aria-label="Erkennungsauflösung">
-        <option value="320">Schnell</option>
-        <option value="416" selected>Ausgewogen</option>
-        <option value="544">Fein</option>
+      <div class="lbl">Fernerkennung<small>Sucht das Bild in Kacheln ab. Normal: 4 Kacheln, Stark: 9 Kacheln, kostet Tempo</small></div>
+      <select id="far" aria-label="Fernerkennung">
+        <option value="off">Aus</option>
+        <option value="on" selected>Normal</option>
+        <option value="max">Stark</option>
       </select>
     </div>
     <div class="row">
@@ -356,7 +356,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 <script>
 (() => {
 'use strict';
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const HEAD_DIR = 'models/head/1.1.0/';
 const $ = (s) => document.querySelector(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -398,7 +398,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* privat/voll: egal */ } }
 };
-const settings = Object.assign({ threshold: 0.45, labels: true, burnIn: true, detWidth: 416, res: '720' }, store.get('ss.settings', {}));
+const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '720' }, store.get('ss.settings', {}));
 let sightings = store.get('ss.sightings', []);
 if (!Array.isArray(sightings)) sightings = [];
 
@@ -409,7 +409,7 @@ const clsCanvas = document.createElement('canvas'); clsCanvas.width = clsCanvas.
 const recCanvas = $('#recCanvas'); const rctx = recCanvas.getContext('2d');
 
 let detector = null, classifier = null, head = null, headMeta = null, stream = null, running = false, currentDeviceId = null;
-let hint = null, hintRuns = [], lastHintAt = 0;
+let hint = null, hintRuns = [], lastHintAt = 0, hintFlip = false;
 let zoom = 1, hwZoom = null;
 let tracks = [], nextId = 1, detFps = 0;
 let recorder = null, chunks = [], recStart = 0, recTimerId = 0, micStream = null, recMime = '', isRecording = false, recMap = null, lastClip = null;
@@ -590,6 +590,27 @@ function iou(a, b) {
   const inter = iw * ih, u = a[2] * a[3] + b[2] * b[3] - inter;
   return u > 0 ? inter / u : 0;
 }
+// Überlappung relativ zur kleineren Box (fängt Teilboxen an Kachelrändern)
+function containment(a, b) {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3], bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const iw = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
+  const ih = Math.max(0, Math.min(ay2, by2) - Math.max(a[1], b[1]));
+  const m = Math.min(a[2] * a[3], b[2] * b[3]);
+  return m > 0 ? (iw * ih) / m : 0;
+}
+// Detektionen aus mehreren Durchläufen (Vollbild + Kacheln) zusammenführen
+function mergeDetections(dets) {
+  dets.sort((a, b) => (b.firm - a.firm) || (b.score - a.score));
+  const kept = [];
+  for (const d of dets) {
+    let dup = false;
+    for (const k of kept) {
+      if (iou(k.box, d.box) > 0.45 || containment(k.box, d.box) > 0.7) { dup = true; if (d.firm && !k.firm) { k.firm = true; k.cls = d.cls; k.score = d.score; } break; }
+    }
+    if (!dup) kept.push(d);
+  }
+  return kept;
+}
 function updateTracks(dets, now) {
   const used = new Set();
   tracks.sort((a, b) => b.hits - a.hits);
@@ -599,25 +620,33 @@ function updateTracks(dets, now) {
     if (best >= 0) {
       used.add(best); const d = dets[best]; const a = 0.55;
       for (let k = 0; k < 4; k++) t.box[k] = t.box[k] * (1 - a) + d.box[k] * a;
-      t.cls = d.cls; t.score = d.score; t.hits++; t.missed = 0; t.lastSeen = now;
+      if (d.firm || !t.firm) { t.cls = d.cls; t.score = d.score; }
+      if (d.firm) t.firm = true;
+      t.hits++; t.missed = 0; t.lastSeen = now;
     } else { t.missed++; }
   }
   dets.forEach((d, i) => {
     if (used.has(i)) return;
-    tracks.push({ id: nextId, box: d.box.slice(), cls: d.cls, score: d.score, hits: 1, missed: 0, born: now, lastSeen: now, lastCls: 0, votes: new Map(), species: null, conf: 0, logged: false, color: COLORS[(nextId - 1) % COLORS.length] });
+    tracks.push({ id: nextId, box: d.box.slice(), cls: d.cls, score: d.score, firm: !!d.firm, verified: false, clsRuns: 0, hits: 1, missed: 0, born: now, lastSeen: now, lastCls: 0, votes: new Map(), species: null, conf: 0, logged: false, color: COLORS[(nextId - 1) % COLORS.length] });
     nextId++;
   });
-  tracks = tracks.filter((t) => t.missed <= 10 && (t.hits >= 2 || t.missed <= 2));
+  tracks = tracks.filter((t) => {
+    if (t.missed > 10 || (t.hits < 2 && t.missed > 2)) return false;
+    // Schwache Kandidaten (kleine oder fremde Boxen) brauchen eine Bestätigung durch den Artenkopf
+    if (!t.firm && !t.verified && (t.clsRuns >= 2 || (t.clsRuns >= 1 && now - t.born > 2500))) return false;
+    return true;
+  });
 }
+const isShown = (t) => t.hits >= 2 && (t.firm || t.verified);
 
 /* Artbestimmung pro Track (Ausschnitt -> MobileNet, gewichtete Stimmen über mehrere Durchläufe) */
 async function classifyPending() {
   const now = performance.now();
   const cand = tracks
-    .filter((t) => t.missed === 0 && t.hits >= 2 && now - t.lastCls > (t.species ? 900 : 350))
-    .sort((a, b) => a.lastCls - b.lastCls)[0];
+    .filter((t) => t.missed === 0 && (t.hits >= 2 || !t.firm) && now - t.lastCls > (t.species && t.sure ? 900 : 300))
+    .sort((a, b) => (a.firm - b.firm) || (a.lastCls - b.lastCls))[0];
   if (!cand) return;
-  cand.lastCls = now;
+  cand.lastCls = now; cand.clsRuns++;
   const vw = video.videoWidth, vh = video.videoHeight;
   const [x, y, w, h] = cand.box;
   if (w < 12 || h < 12) return;
@@ -633,6 +662,8 @@ async function classifyPending() {
     cand.probs = cand.probs ? cand.probs.map((v, i) => v * 0.6 + p[i] * 0.4) : p;
     const d = decideSpecies(cand.probs);
     cand.species = d.name; cand.conf = d.conf; cand.other = d.other; cand.sure = d.sure;
+    // Ein schwacher Kandidat gilt als bestätigt, sobald der Artenkopf eine Art klar erkennt
+    if (!cand.firm && d.name && !d.other && d.conf >= 0.6) cand.verified = true;
     if (d.sure) maybeLog(cand);
     return;
   }
@@ -686,22 +717,24 @@ function decideSpecies(probs) {
   }
   // Sammelname, wenn zwei Klassen derselben Gruppe sich den Spitzenplatz teilen
   if (c1.group && c2.group === c1.group && p1 - p2 < 0.3) {
-    return { name: c1.group, conf: p1 + p2, sure: p1 + p2 >= 0.55, other: false };
+    return { name: c1.group, conf: p1 + p2, sure: p1 + p2 >= 0.5, other: false };
   }
   // Zu unsicher für einen Artnamen: nur der grobe Detektor-Hinweis bleibt
   if (p1 < 0.35) return { name: null, conf: p1, sure: false, other: false };
-  return { name: c1.name, conf: p1, sure: p1 >= 0.55, other: false };
+  return { name: c1.name, conf: p1, sure: p1 >= 0.5, other: false };
 }
 
 /* Hinweis ohne Rahmen: wenn der Detektor nichts findet, wird die Bildmitte geprüft (Krokodil, Schildkröte, Waran, Schliefer) */
 async function idleHint(now) {
   if (!head) return;
-  const active = tracks.some((t) => t.hits >= 2 && t.missed === 0);
+  const active = tracks.some((t) => isShown(t) && t.missed === 0);
   if (active) { hintRuns = []; if (hint && now > hint.until) hint = null; return; }
   if (now - lastHintAt < 700) return;
   lastHintAt = now;
   const reg = visibleRegion();
-  const side = Math.min(reg.w, reg.h) * 0.7;
+  // Abwechselnd grosser und kleiner Mittelausschnitt (kleiner für ferne Tiere)
+  hintFlip = !hintFlip;
+  const side = Math.min(reg.w, reg.h) * (hintFlip ? 0.7 : 0.4);
   cctx.drawImage(video, reg.x + (reg.w - side) / 2, reg.y + (reg.h - side) / 2, side, side, 0, 0, 224, 224);
   const r = await runHead(clsCanvas);
   if (!r) return;
@@ -766,27 +799,68 @@ $('#btnClearSight').addEventListener('click', () => {
 });
 
 /* ---------- Erkennungsschleife ---------- */
+// Ein Detektor-Durchlauf über einen Ausschnitt (Videokoordinaten). Der Detektor rechnet intern immer mit 300×300 Pixeln,
+// darum werden ferne Tiere nur sichtbar, wenn man ihm Kacheln statt des ganzen Bildes gibt.
+const BLOCKED_COCO = new Set(['person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck', 'boat', 'airplane']);
+async function detectRegion(x, y, w, h, size, isTile) {
+  const dw = size, dh = Math.max(32, Math.round(size * h / w));
+  if (detCanvas.width !== dw || detCanvas.height !== dh) { detCanvas.width = dw; detCanvas.height = dh; }
+  dctx.drawImage(video, x, y, w, h, 0, 0, dw, dh);
+  const minScore = Math.max(0.12, settings.threshold * 0.4);
+  const preds = await detector.detect(detCanvas, 10, minScore);
+  const sx = w / dw, sy = h / dh;
+  const out = [];
+  for (const p of preds) {
+    if (BLOCKED_COCO.has(p.class)) continue;
+    const box = [x + p.bbox[0] * sx, y + p.bbox[1] * sy, p.bbox[2] * sx, p.bbox[3] * sy];
+    // Boxen, die an einem Kachelrand kleben, sind oft abgeschnitten: nur als schwache Kandidaten
+    const edge = isTile && (p.bbox[0] < 2 || p.bbox[1] < 2 || p.bbox[0] + p.bbox[2] > dw - 2 || p.bbox[1] + p.bbox[3] > dh - 2);
+    const firm = ANIMAL_COCO.has(p.class) && p.score >= settings.threshold && !edge;
+    out.push({ box, cls: p.class, score: p.score, firm });
+  }
+  return out;
+}
+function tileGrid(reg, n) {
+  // n×n Kacheln mit Überlappung, jede deckt (1/n + 0.15) des Ausschnitts
+  const tiles = [];
+  const fw = Math.min(1, 1 / n + 0.15), fh = Math.min(1, 1 / n + 0.15);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const fx = n === 1 ? 0 : (i / (n - 1)) * (1 - fw), fy = n === 1 ? 0 : (j / (n - 1)) * (1 - fh);
+    tiles.push({ x: reg.x + fx * reg.w, y: reg.y + fy * reg.h, w: fw * reg.w, h: fh * reg.h });
+  }
+  return tiles;
+}
 async function detectLoop() {
   while (running) {
     if (!syncCanvases() || video.paused) { await sleep(60); continue; }
     const t0 = performance.now();
     const reg = visibleRegion();
-    const dw = settings.detWidth, dh = Math.max(32, Math.round(dw * reg.h / reg.w));
-    if (detCanvas.width !== dw || detCanvas.height !== dh) { detCanvas.width = dw; detCanvas.height = dh; }
-    dctx.drawImage(video, reg.x, reg.y, reg.w, reg.h, 0, 0, dw, dh);
-    let preds = [];
-    try { preds = await detector.detect(detCanvas, 8, settings.threshold); }
-    catch (e) { console.error(e); await sleep(250); continue; }
-    const sx = reg.w / dw, sy = reg.h / dh;
-    const dets = preds.filter((p) => ANIMAL_COCO.has(p.class)).map((p) => ({
-      box: [reg.x + p.bbox[0] * sx, reg.y + p.bbox[1] * sy, p.bbox[2] * sx, p.bbox[3] * sy], cls: p.class, score: p.score
-    }));
+    let dets = [];
+    try {
+      dets = await detectRegion(reg.x, reg.y, reg.w, reg.h, 416, false);
+      const n = settings.far === 'max' ? 3 : settings.far === 'off' ? 0 : 2;
+      if (n) {
+        for (const t of tileGrid(reg, n)) {
+          if (!running) break;
+          dets = dets.concat(await detectRegion(t.x, t.y, t.w, t.h, 320, true));
+        }
+      }
+    } catch (e) { console.error(e); await sleep(250); continue; }
+    dets = mergeDetections(dets);
+    // Höchstens drei schwache Kandidaten pro Durchlauf, sinnvoll gross, damit die Bestätigung nicht verhungert
+    const minSide = Math.min(reg.w, reg.h) * 0.03, maxSide = Math.max(reg.w, reg.h) * 0.9;
+    let weak = 0;
+    dets = dets.filter((d) => {
+      if (d.firm) return true;
+      if (d.box[2] < minSide || d.box[3] < minSide || d.box[2] > maxSide || d.box[3] > maxSide) return false;
+      return ++weak <= 3;
+    });
     updateTracks(dets, performance.now());
     await classifyPending();
     await idleHint(performance.now());
     const dt = performance.now() - t0;
     detFps = detFps * 0.8 + (1000 / Math.max(dt, 1)) * 0.2;
-    if (dt < 70) await sleep(70 - dt);
+    if (dt < 50) await sleep(50 - dt);
   }
 }
 
@@ -800,7 +874,7 @@ function roundRect(ctx, x, y, w, h, r) {
 // map: Videokoordinaten -> Zielkoordinaten; px: Grösse eines CSS-Pixels im Ziel
 function drawOverlay(ctx, map, px) {
   for (const t of tracks) {
-    if (t.hits < 2) continue;
+    if (!isShown(t)) continue;
     const [x, y, w, h] = t.box;
     const X = (x - map.ox) * map.k, Y = (y - map.oy) * map.k, W = w * map.k, H = h * map.k;
     const sure = !!t.sure;
@@ -881,7 +955,7 @@ function render() {
     rctx.textAlign = 'left';
   }
   if (++fpsTick % 15 === 0) {
-    const n = tracks.filter((t) => t.hits >= 2).length;
+    const n = tracks.filter(isShown).length;
     $('#fps').textContent = Math.round(detFps) + ' fps';
     const hinting = n === 0 && hint && performance.now() < hint.until;
     setStatus(hinting ? hint.name + ' vermutet' : n === 0 ? 'Suche Tiere …' : n === 1 ? '1 Tier im Bild' : n + ' Tiere im Bild', true);
@@ -980,8 +1054,8 @@ function bindSettings() {
     el.addEventListener('click', () => { settings[key] = !settings[key]; el.setAttribute('aria-checked', String(settings[key])); store.set('ss.settings', settings); });
   };
   sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn');
-  const dw = $('#detWidth'); dw.value = String(settings.detWidth);
-  dw.addEventListener('change', () => { settings.detWidth = parseInt(dw.value, 10) || 416; store.set('ss.settings', settings); });
+  const far = $('#far'); far.value = ['off', 'on', 'max'].includes(settings.far) ? settings.far : 'on';
+  far.addEventListener('change', () => { settings.far = far.value; store.set('ss.settings', settings); });
   const res = $('#res'); res.value = settings.res;
   res.addEventListener('change', () => { settings.res = res.value; store.set('ss.settings', settings); toast('Gilt ab dem nächsten Kamerastart'); });
   $('#ver').textContent = 'v' + VERSION;

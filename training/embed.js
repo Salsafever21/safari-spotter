@@ -36,7 +36,9 @@ function variants(img) {
     const center = tf.image.cropAndResize(batch, [[(h - s) / 2 / h, (w - s) / 2 / w, (h + s) / 2 / h, (w + s) / 2 / w]], [0], [224, 224]);
     const tight = tf.image.cropAndResize(batch, [[0.12, 0.12, 0.88, 0.88]], [0], [224, 224]);
     const flip = (t) => tf.reverse(t, 2);
-    return tf.concat([center, flip(center), tight, flip(tight)], 0).toInt(); // [4,224,224,3]
+    // Fern-Variante: enger Ausschnitt auf 72 px herunter- und wieder hochgerechnet, wie ein kleines Tier in der Distanz
+    const far = tf.image.resizeBilinear(tf.image.resizeBilinear(tight, [72, 72]), [224, 224]);
+    return tf.concat([center, flip(center), tight, flip(tight), far], 0).toInt(); // [5,224,224,3]
   });
 }
 
