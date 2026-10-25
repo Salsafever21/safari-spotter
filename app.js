@@ -1,7 +1,7 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
@@ -37,35 +37,40 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Speicher voll, Eintrag nicht gesichert'); } }
 };
-// IndexedDB für Korrekturen (Bildausschnitte)
+// IndexedDB: Korrekturen (Bildausschnitte) und Fotos (Schnappschüsse, Foto-Modus, analysierte Bilder)
 const idb = {
   db: null,
   open() {
     if (this.db) return Promise.resolve(this.db);
     return new Promise((res, rej) => {
       if (!('indexedDB' in window)) { rej(new Error('kein IndexedDB')); return; }
-      const r = indexedDB.open('spotter', 1);
-      r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('corrections')) d.createObjectStore('corrections', { keyPath: 'id', autoIncrement: true }); };
+      const r = indexedDB.open('spotter', 2);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains('corrections')) d.createObjectStore('corrections', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+      };
       r.onsuccess = () => { this.db = r.result; res(this.db); };
       r.onerror = () => rej(r.error);
     });
   },
-  tx(mode, fn) {
+  tx(store, mode, fn) {
     return this.open().then((d) => new Promise((res, rej) => {
-      const t = d.transaction('corrections', mode); const s = t.objectStore('corrections');
+      const t = d.transaction(store, mode); const s = t.objectStore(store);
       let out; try { out = fn(s); } catch (e) { rej(e); return; }
       t.oncomplete = () => res(out && 'result' in out ? out.result : out);
       t.onerror = () => rej(t.error);
     }));
   },
-  add(item) { return this.tx('readwrite', (s) => s.add(item)); },
-  put(item) { return this.tx('readwrite', (s) => s.put(item)); },
-  del(id) { return this.tx('readwrite', (s) => s.delete(id)); },
-  all() { return this.open().then((d) => new Promise((res, rej) => { const r = d.transaction('corrections').objectStore('corrections').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })).catch(() => []); }
+  add(item, store = 'corrections') { return this.tx(store, 'readwrite', (s) => s.add(item)); },
+  put(item, store = 'corrections') { return this.tx(store, 'readwrite', (s) => s.put(item)); },
+  del(id, store = 'corrections') { return this.tx(store, 'readwrite', (s) => s.delete(id)); },
+  get(id, store = 'corrections') { return this.tx(store, 'readonly', (s) => s.get(id)).catch(() => null); },
+  all(store = 'corrections') { return this.open().then((d) => new Promise((res, rej) => { const r = d.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })).catch(() => []); }
 };
 
 /* ---------- Zustand ---------- */
-const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true }, store.get('ss.settings', {}));
+const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true, snapshots: true }, store.get('ss.settings', {}));
 // Einmalige Umstellung alter Installationen auf 4K (vorher Standard 720p)
 if (!settings.res4k) { if (settings.res === '720') settings.res = '2160'; settings.res4k = true; store.set('ss.settings', settings); }
 let sightings = store.get('ss.sightings', []);
@@ -125,10 +130,11 @@ $$('#sheetSightings [role=tab]').forEach((b) => b.addEventListener('click', () =
 function showTab(tab) {
   activeTab = tab;
   $$('#sheetSightings [role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-  $('#tabList').hidden = tab !== 'list'; $('#tabStats').hidden = tab !== 'stats'; $('#tabTrip').hidden = tab !== 'trip'; $('#tabReview').hidden = tab !== 'review';
+  $('#tabList').hidden = tab !== 'list'; $('#tabStats').hidden = tab !== 'stats'; $('#tabTrip').hidden = tab !== 'trip'; $('#tabReview').hidden = tab !== 'review'; $('#tabGallery').hidden = tab !== 'gallery';
   if (tab === 'stats') renderStats();
   if (tab === 'trip') { renderTrip(); setTimeout(renderMap, 50); }
   if (tab === 'review') renderReview();
+  if (tab === 'gallery') renderGallery();
 }
 
 /* ---------- Modelle und Daten ---------- */
@@ -385,8 +391,10 @@ function renderTrip() {
 }
 
 /* ---------- Karte ---------- */
-function renderMap() {
+async function renderMap() {
   if (typeof L === 'undefined') return;
+  const photos = (await idb.all('photos')).sort((a, b) => b.t - a.t);
+  galleryItems = photos;
   if (!map) {
     map = L.map('map', { zoomControl: true, attributionControl: true });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenStreetMap' }).addTo(map);
@@ -407,7 +415,14 @@ function renderMap() {
     }
     bounds.push([s.lat, s.lon]);
   });
+  photos.forEach((ph, i) => {
+    if (ph.lat == null) return;
+    const icon = L.divIcon({ className: 'photo-pin' + (ph.coarse ? ' coarse' : ''), html: '<img src="' + (ph.thumb || '') + '" alt="">', iconSize: [46, 46], iconAnchor: [23, 23] });
+    L.marker([ph.lat, ph.lon], { icon, title: ph.species.join(', ') }).addTo(mapLayers).on('click', () => openViewer(i));
+    bounds.push([ph.lat, ph.lon]);
+  });
   if (lastFix) { L.circleMarker([lastFix.lat, lastFix.lon], { radius: 6, color: '#5ec8f2', fillColor: '#5ec8f2', fillOpacity: 0.9 }).addTo(mapLayers); bounds.push([lastFix.lat, lastFix.lon]); }
+  $('#mapInfo').textContent = (pts.length > 1 ? fmtKm(trip.active ? trip.dist : trips[0].dist) + ' km Route · ' : '') + photos.filter((p) => p.lat != null).length + ' Fotos mit Standort · ' + sightings.filter((s) => s.lat != null).length + ' Sichtungen. Tipp auf ein Bild öffnet es.';
   if (bounds.length) { try { map.fitBounds(bounds, { padding: [24, 24], maxZoom: 14 }); } catch (e) { /* egal */ } }
 }
 
@@ -550,7 +565,7 @@ async function idleHint(now) {
   const same = d.name ? hintRuns.filter((x) => x.name === d.name && !x.other && x.conf >= 0.6).length : 0;
   if (same >= 2 && !d.other) {
     hint = { name: d.name, conf: d.conf, until: now + 1800 };
-    if (same >= 4 && d.conf >= 0.7) logSighting(d.name, { fromHint: true, thumb: safeThumb() });
+    if (same >= 4 && d.conf >= 0.7) { const id = logSighting(d.name, { fromHint: true, thumb: safeThumb() }); if (id && lastLogNew && settings.snapshots !== false) snapshotFrame([d.name], [id]); }
   } else if (hint && now > hint.until) hint = null;
 }
 function safeThumb() { try { thumbCanvas.width = thumbCanvas.height = 96; tctx.drawImage(clsCanvas, 0, 0, 224, 224, 0, 0, 96, 96); return thumbCanvas.toDataURL('image/jpeg', 0.6); } catch (e) { return null; } }
@@ -562,8 +577,9 @@ function maybeLog(t) {
   t.logged = true;
   const thumb = thumbFrom(video, video.videoWidth, video.videoHeight, t.box);
   t.sightId = logSighting(t.species, { thumb, key: t.key });
+  if (lastLogNew && settings.snapshots !== false) snapshotFrame([t.species], [t.sightId]);
 }
-let lastHintLog = { name: '', t: 0 };
+let lastHintLog = { name: '', t: 0 }, lastLogNew = false;
 function positionFor(name) {
   if (!lastFix || Date.now() - lastFix.t > 180000) return {};
   if (isSensitive(name)) { const c = coarsen(lastFix.lat, lastFix.lon); return { lat: c.lat, lon: c.lon, acc: 10000, coarse: true }; }
@@ -575,7 +591,8 @@ function logSighting(name, opt = {}) {
   if (opt.fromHint) { if (lastHintLog.name === name && now - lastHintLog.t < 60000) return null; lastHintLog = { name, t: now }; }
   const last = sightings[sightings.length - 1];
   const n = opt.n || 1;
-  if (!opt.noMerge && last && last.s === name && now - last.t < 30000) { last.n = (last.n || 1) + n; last.t = now; if (!last.thumb && opt.thumb) last.thumb = opt.thumb; store.set('ss.sightings', sightings); renderSightings(); return last.id; }
+  if (!opt.noMerge && last && last.s === name && now - last.t < 30000) { last.n = (last.n || 1) + n; last.t = now; if (!last.thumb && opt.thumb) last.thumb = opt.thumb; store.set('ss.sightings', sightings); renderSightings(); lastLogNew = false; return last.id; }
+  lastLogNew = true;
   const e = Object.assign({ id: 's' + now + '-' + (++sightSeq), s: name, key: opt.key || null, t: opt.t || now, n, thumb: opt.thumb || null, src: opt.fromHint ? 'hint' : (opt.src || 'cam') }, opt.pos || positionFor(name));
   sightings.push(e);
   store.set('ss.sightings', sightings);
@@ -819,6 +836,192 @@ viewportEl.addEventListener('click', (ev) => {
   openCorrection({ mode: 'track', track: t, img, predicted: t.species || null, predKey: t.key || null, conf: t.conf });
 });
 
+/* ---------- Fotos: Speicher, Schnappschüsse, EXIF, Galerie, Viewer ---------- */
+let photoCount = 0, galleryItems = [], viewerIdx = -1, viewerUrl = null, viewerBoxes = true;
+const PHOTO_MAX = { auto: 1280, cam: 2560, photo: 1600 };
+function canvasToBlob(c, q = 0.85) { return new Promise((res) => c.toBlob((b) => res(b), 'image/jpeg', q)); }
+// Quelle (Video oder Canvas) auf maxSide begrenzt in ein neues Canvas zeichnen
+function scaledCanvas(src, sx, sy, sw, sh, maxSide) {
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+  c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return { canvas: c, k };
+}
+function thumbOf(c, size = 160) {
+  const side = Math.min(c.width, c.height);
+  thumbCanvas.width = thumbCanvas.height = size;
+  tctx.drawImage(c, (c.width - side) / 2, (c.height - side) / 2, side, side, 0, 0, size, size);
+  try { return thumbCanvas.toDataURL('image/jpeg', 0.7); } catch (e) { return null; }
+}
+// Speichert ein Foto. dets: Rahmen in Bildkoordinaten des gespeicherten Bildes.
+async function savePhoto({ canvas, kind, species, dets, t, pos, sightIds }) {
+  try {
+    const blob = await canvasToBlob(canvas, kind === 'auto' ? 0.8 : 0.88);
+    if (!blob) return null;
+    const item = { t: t || Date.now(), kind, species: species || [], dets: dets || [], w: canvas.width, h: canvas.height, blob, thumb: thumbOf(canvas), sightIds: sightIds || [], lat: pos && pos.lat != null ? pos.lat : null, lon: pos && pos.lon != null ? pos.lon : null, coarse: !!(pos && pos.coarse), acc: pos ? pos.acc : null };
+    const id = await idb.add(item, 'photos');
+    photoCount++; updatePhotoBadge();
+    return id;
+  } catch (e) { console.warn('Foto nicht gespeichert', e); return null; }
+}
+function updatePhotoBadge() { const b = $('#photoCount'); if (b) { b.textContent = String(photoCount); b.hidden = photoCount === 0; } }
+async function countPhotos() { photoCount = (await idb.all('photos')).length; updatePhotoBadge(); }
+// Schnappschuss des sichtbaren Kamerabilds mit den aktuellen Rahmen (bei jeder neuen Sichtung)
+async function snapshotFrame(names, sightIds) {
+  if (!running || !syncCanvases()) return null;
+  const reg = visibleRegion();
+  const { canvas, k } = scaledCanvas(video, reg.x, reg.y, reg.w, reg.h, PHOTO_MAX.auto);
+  const dets = tracks.filter(isShown).map((t) => ({ box: [(t.box[0] - reg.x) * k, (t.box[1] - reg.y) * k, t.box[2] * k, t.box[3] * k], name: t.species, conf: t.conf, sure: !!t.sure }));
+  const sens = names.some(isSensitive);
+  const pos = positionFor(sens ? 'Nashorn' : (names[0] || ''));
+  return savePhoto({ canvas, kind: 'auto', species: names, dets, pos, sightIds });
+}
+// EXIF (Datum, GPS, Beschreibung) in ein JPEG ohne EXIF einfügen, damit Fotos-Apps das Bild auf der Karte und in der Zeitleiste einordnen
+function withExif(blob, meta) {
+  return blob.arrayBuffer().then((buf) => {
+    const src = new Uint8Array(buf);
+    if (src[0] !== 0xFF || src[1] !== 0xD8) return blob;
+    const enc = new TextEncoder();
+    const ascii = (str) => { const b = enc.encode(str); const out = new Uint8Array(b.length + 1); out.set(b); return out; };
+    const d = new Date(meta.t || Date.now());
+    const stamp = d.getFullYear() + ':' + pad2(d.getMonth() + 1) + ':' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    const rat = (v) => { const den = 1000000; return [Math.round(v * den), den]; };
+    const dms = (deg) => { const a = Math.abs(deg), dd = Math.floor(a), mm = Math.floor((a - dd) * 60), ss = (a - dd - mm / 60) * 3600; return [[dd, 1], [mm, 1], rat(ss)]; };
+    // IFD-Bauer (little endian)
+    const build = (entries, base) => {
+      // entries: [tag, type, values]; type 2 ASCII (Uint8Array), 3 SHORT, 4 LONG, 5 RATIONAL ([n,d] list), 1 BYTE (Uint8Array)
+      const n = entries.length; const head = 2 + n * 12 + 4; let extra = []; let extraLen = 0;
+      const parts = entries.map(([tag, type, val]) => {
+        let count, payload;
+        if (type === 2 || type === 1) { count = val.length; payload = val; }
+        else if (type === 3) { count = 1; payload = new Uint8Array(4); new DataView(payload.buffer).setUint16(0, val, true); }
+        else if (type === 4) { count = 1; payload = new Uint8Array(4); new DataView(payload.buffer).setUint32(0, val, true); }
+        else { count = val.length; payload = new Uint8Array(val.length * 8); const dv = new DataView(payload.buffer); val.forEach(([a, b], i) => { dv.setUint32(i * 8, a, true); dv.setUint32(i * 8 + 4, b, true); }); }
+        let inline = null, off = 0;
+        if (payload.length <= 4) { inline = new Uint8Array(4); inline.set(payload); }
+        else { off = base + head + extraLen; extra.push(payload); extraLen += payload.length + (payload.length % 2); }
+        return { tag, type, count, inline, off };
+      });
+      const out = new Uint8Array(head + extraLen); const dv = new DataView(out.buffer);
+      dv.setUint16(0, n, true);
+      parts.forEach((p, i) => { const e = 2 + i * 12; dv.setUint16(e, p.tag, true); dv.setUint16(e + 2, p.type, true); dv.setUint32(e + 4, p.count, true); if (p.inline) out.set(p.inline, e + 8); else dv.setUint32(e + 8, p.off, true); });
+      let o = head; extra.forEach((x) => { out.set(x, o); o += x.length + (x.length % 2); });
+      return out;
+    };
+    // Reihenfolge: IFD0 ab 8, dann Exif-IFD, dann GPS-IFD. Grössen zweimal berechnen, weil IFD0 die Zeiger enthält.
+    const hasGps = meta.lat != null && meta.lon != null;
+    const exifEntries = [[0x9003, 2, ascii(stamp)], [0x9004, 2, ascii(stamp)]];
+    const gpsEntries = hasGps ? [[0x0000, 1, new Uint8Array([2, 3, 0, 0])], [0x0001, 2, ascii(meta.lat < 0 ? 'S' : 'N')], [0x0002, 5, dms(meta.lat)], [0x0003, 2, ascii(meta.lon < 0 ? 'W' : 'E')], [0x0004, 5, dms(meta.lon)]] : null;
+    const ifd0Entries = (exifOff, gpsOff) => {
+      const e = [];
+      if (meta.desc) e.push([0x010E, 2, ascii(meta.desc)]);
+      e.push([0x0131, 2, ascii('Safari Spotter ' + VERSION)]);
+      e.push([0x0132, 2, ascii(stamp)]);
+      e.push([0x8769, 4, exifOff]);
+      if (gpsOff) e.push([0x8825, 4, gpsOff]);
+      return e.sort((a, b) => a[0] - b[0]);
+    };
+    let ifd0 = build(ifd0Entries(0, gpsEntries ? 0 : null), 8);
+    const exifOff = 8 + ifd0.length;
+    const exifIfd = build(exifEntries, exifOff);
+    const gpsOff = gpsEntries ? exifOff + exifIfd.length : null;
+    ifd0 = build(ifd0Entries(exifOff, gpsOff), 8);
+    const gpsIfd = gpsEntries ? build(gpsEntries, gpsOff) : new Uint8Array(0);
+    const tiff = new Uint8Array(8 + ifd0.length + exifIfd.length + gpsIfd.length);
+    tiff.set([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]); tiff.set(ifd0, 8); tiff.set(exifIfd, exifOff); if (gpsEntries) tiff.set(gpsIfd, gpsOff);
+    const app1Len = 2 + 6 + tiff.length;
+    const app1 = new Uint8Array(4 + 6 + tiff.length);
+    app1.set([0xFF, 0xE1, (app1Len >> 8) & 0xFF, app1Len & 0xFF, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00]); app1.set(tiff, 10);
+    // Vorhandenes APP1 (Exif) überspringen, falls doch eines da ist
+    let p = 2;
+    if (src[2] === 0xFF && src[3] === 0xE1 && src[6] === 0x45 && src[7] === 0x78) p = 4 + ((src[4] << 8) | src[5]);
+    const out = new Uint8Array(2 + app1.length + (src.length - p));
+    out.set(src.subarray(0, 2)); out.set(app1, 2); out.set(src.subarray(p), 2 + app1.length);
+    return new Blob([out], { type: 'image/jpeg' });
+  });
+}
+function photoDesc(ph) { return 'Safari Spotter: ' + (ph.species && ph.species.length ? ph.species.join(', ') : 'Sichtung') + (ph.coarse ? ' (Standort ±10 km, Artenschutz)' : ''); }
+function photoFilename(ph) { const d = new Date(ph.t); return 'safari-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + (ph.species && ph.species[0] ? '-' + ph.species[0].toLowerCase().replace(/[^a-z0-9äöü]+/g, '-') : '') + '.jpg'; }
+async function photoWithBoxesBlob(ph) {
+  if (!viewerBoxes || !ph.dets || !ph.dets.length) return ph.blob;
+  const img = await blobToImage(ph.blob);
+  const c = document.createElement('canvas'); c.width = ph.w; c.height = ph.h; const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  drawStillBoxes(g, ph.dets.map((d, i) => Object.assign({ color: COLORS[i % COLORS.length], cls: 'bird' }, d)), Math.max(1, ph.w / 600));
+  return canvasToBlob(c, 0.9);
+}
+function blobToImage(blob) { return new Promise((res, rej) => { const u = URL.createObjectURL(blob); const im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('Bild')); }; im.src = u; }); }
+async function exportPhoto(ph) {
+  const blob = await withExif(await photoWithBoxesBlob(ph), { t: ph.t, lat: ph.lat, lon: ph.lon, desc: photoDesc(ph) });
+  return shareOrDownload(blob, photoFilename(ph), 'Safari Foto');
+}
+async function exportPhotos(list) {
+  const files = [];
+  for (const ph of list) files.push(new File([await withExif(await photoWithBoxesBlob(ph), { t: ph.t, lat: ph.lat, lon: ph.lon, desc: photoDesc(ph) })], photoFilename(ph), { type: 'image/jpeg' }));
+  if (navigator.canShare && navigator.canShare({ files })) { try { await navigator.share({ files, title: 'Safari Fotos' }); return true; } catch (e) { if (e && e.name === 'AbortError') return false; } }
+  for (const f of files) downloadBlob(f, f.name);
+  return true;
+}
+// Galerie
+async function renderGallery() {
+  galleryItems = (await idb.all('photos')).sort((a, b) => b.t - a.t);
+  photoCount = galleryItems.length; updatePhotoBadge();
+  const grid = $('#galleryGrid'); grid.innerHTML = '';
+  $('#galleryEmpty').hidden = galleryItems.length > 0;
+  $('#galleryInfo').textContent = galleryItems.length ? galleryItems.length + ' Fotos · ' + Math.round(galleryItems.reduce((a, p) => a + (p.blob ? p.blob.size : 0), 0) / 1048576) + ' MB auf dem Gerät' : '';
+  galleryItems.forEach((ph, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'gthumb'; b.setAttribute('aria-label', (ph.species[0] || 'Foto') + ' ' + fmtTime(ph.t));
+    const im = document.createElement('img'); im.src = ph.thumb || ''; im.alt = ''; im.loading = 'lazy';
+    const cap = document.createElement('span'); cap.textContent = (ph.species[0] || (ph.kind === 'photo' ? 'Bild' : 'Foto')) + (ph.species.length > 1 ? ' +' + (ph.species.length - 1) : '');
+    const kind = document.createElement('i'); kind.textContent = ph.kind === 'auto' ? 'Erkennung' : ph.kind === 'cam' ? 'Foto' : 'Mediathek';
+    b.append(im, cap, kind); b.addEventListener('click', () => openViewer(i)); grid.appendChild(b);
+  });
+}
+async function openViewer(i) {
+  if (!galleryItems.length) galleryItems = (await idb.all('photos')).sort((a, b) => b.t - a.t);
+  if (i < 0 || i >= galleryItems.length) return;
+  viewerIdx = i; const ph = galleryItems[i];
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  const img = await blobToImage(ph.blob);
+  const c = $('#viewerCanvas'); c.width = ph.w || img.naturalWidth; c.height = ph.h || img.naturalHeight;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height);
+  if (viewerBoxes && ph.dets && ph.dets.length) drawStillBoxes(g, ph.dets.map((d, k) => Object.assign({ color: COLORS[k % COLORS.length], cls: 'bird' }, d)), Math.max(1, c.width / 600));
+  $('#viewerTitle').textContent = ph.species.length ? ph.species.join(', ') : (ph.kind === 'photo' ? 'Bild aus der Mediathek' : 'Foto');
+  $('#viewerMeta').textContent = fmtDate(ph.t) + ' ' + fmtTime(ph.t) + ' · ' + (ph.lat == null ? 'ohne Standort' : ph.coarse ? 'Standort ±10 km (Artenschutz)' : 'GPS ' + ph.lat.toFixed(4) + ', ' + ph.lon.toFixed(4)) + ' · ' + (i + 1) + '/' + galleryItems.length;
+  $('#btnViewerBoxes').textContent = viewerBoxes ? 'Rahmen aus' : 'Rahmen ein';
+  $('#btnViewerBoxes').hidden = !(ph.dets && ph.dets.length);
+  $('#btnViewerCorrect').hidden = !(ph.sightIds && ph.sightIds.length);
+  $('#viewer').hidden = false;
+}
+function closeViewer() { $('#viewer').hidden = true; if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; } }
+$('#btnViewerClose').addEventListener('click', closeViewer);
+$('#btnViewerPrev').addEventListener('click', () => openViewer(viewerIdx - 1));
+$('#btnViewerNext').addEventListener('click', () => openViewer(viewerIdx + 1));
+$('#btnViewerBoxes').addEventListener('click', () => { viewerBoxes = !viewerBoxes; openViewer(viewerIdx); });
+$('#btnViewerSave').addEventListener('click', async () => { const ph = galleryItems[viewerIdx]; if (!ph) return; toast('Bereite Foto vor …', 1500); await exportPhoto(ph); });
+$('#btnViewerDelete').addEventListener('click', async () => {
+  const ph = galleryItems[viewerIdx]; if (!ph) return;
+  await idb.del(ph.id, 'photos'); galleryItems.splice(viewerIdx, 1); photoCount = galleryItems.length; updatePhotoBadge();
+  if (!galleryItems.length) { closeViewer(); renderGallery(); return; }
+  openViewer(Math.min(viewerIdx, galleryItems.length - 1)); renderGallery();
+});
+$('#btnViewerCorrect').addEventListener('click', () => { const ph = galleryItems[viewerIdx]; if (!ph || !ph.sightIds.length) return; const e = sightings.find((x) => x.id === ph.sightIds[0]); closeViewer(); openCorrection({ mode: 'sighting', id: ph.sightIds[0], img: ph.thumb, predicted: e ? e.s : ph.species[0] }); });
+// Wischen im Viewer
+(() => { let x0 = null; const v = $('#viewer');
+  v.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  v.addEventListener('touchend', (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (dx < -50) openViewer(viewerIdx + 1); else if (dx > 50) openViewer(viewerIdx - 1); }, { passive: true });
+  document.addEventListener('keydown', (e) => { if (v.hidden) return; if (e.key === 'ArrowRight') openViewer(viewerIdx + 1); if (e.key === 'ArrowLeft') openViewer(viewerIdx - 1); if (e.key === 'Escape') closeViewer(); });
+})();
+$('#btnGalleryExport').addEventListener('click', async () => {
+  if (!galleryItems.length) await renderGallery();
+  if (!galleryItems.length) { toast('Noch keine Fotos'); return; }
+  const list = galleryItems.slice(0, 20);
+  toast('Bereite ' + list.length + ' Fotos vor …', 2500);
+  const ok = await exportPhotos(list);
+  if (ok) toast(list.length + ' Fotos übergeben' + (galleryItems.length > 20 ? ' (die neuesten 20, Rest erneut sichern)' : ''), 3500);
+});
+$('#btnGalleryClear').addEventListener('click', async () => { const all = await idb.all('photos'); for (const p of all) await idb.del(p.id, 'photos'); renderGallery(); toast('Fotos gelöscht'); });
+
 /* ---------- Bildanalyse (Mediathek und Foto-Modus) ---------- */
 async function detectRegionFrom(src, sw, sh, x, y, w, h, size, isTile) {
   const dw = size, dh = Math.max(32, Math.round(size * h / w));
@@ -990,16 +1193,28 @@ $('#btnPhotoSave').addEventListener('click', () => {
   dets.filter((d) => d.name && !d.other).forEach((d) => { const e = counts.get(d.name) || { n: 0, key: d.key, img: d.img }; e.n++; counts.set(d.name, e); });
   if (!counts.size) { toast('Keine bestimmbare Art'); return; }
   const t = meta.exif && meta.exif.time ? meta.exif.time : Date.now();
-  counts.forEach((e, name) => {
-    let pos = {};
-    if (meta.exif && meta.exif.lat != null) { if (isSensitive(name)) { const c = coarsen(meta.exif.lat, meta.exif.lon); pos = { lat: c.lat, lon: c.lon, acc: 10000, coarse: true }; } else pos = { lat: Math.round(meta.exif.lat * 1e5) / 1e5, lon: Math.round(meta.exif.lon * 1e5) / 1e5, acc: 15, coarse: false }; }
-    else pos = positionFor(name);
-    logSighting(name, { key: e.key, n: e.n, thumb: e.img, t, pos, src: meta.src || 'photo', noMerge: true });
-  });
-  toast('Als Sichtung gespeichert');
+  const ids = [], names = [];
+  const posFor = (name) => {
+    if (meta.exif && meta.exif.lat != null) { if (isSensitive(name)) { const c = coarsen(meta.exif.lat, meta.exif.lon); return { lat: c.lat, lon: c.lon, acc: 10000, coarse: true }; } return { lat: Math.round(meta.exif.lat * 1e5) / 1e5, lon: Math.round(meta.exif.lon * 1e5) / 1e5, acc: 15, coarse: false }; }
+    return positionFor(name);
+  };
+  counts.forEach((e, name) => { names.push(name); ids.push(logSighting(name, { key: e.key, n: e.n, thumb: e.img, t, pos: posFor(name), src: meta.src || 'photo', noMerge: true })); });
+  // Foto mit Rahmen-Daten speichern (Bild ohne eingebrannte Rahmen, Rahmen werden beim Anzeigen gezeichnet)
+  const kind = meta.src === 'cam' ? 'cam' : 'photo';
+  const { canvas, k } = scaledCanvas(photoCur.base, 0, 0, photoCur.base.width, photoCur.base.height, PHOTO_MAX[kind]);
+  const pdets = dets.filter((d) => d.box).map((d) => ({ box: d.box.map((v) => v * k), name: d.name, conf: d.conf, sure: !!d.sure }));
+  savePhoto({ canvas, kind, species: names, dets: pdets, t, pos: posFor(names.some(isSensitive) ? 'Nashorn' : names[0]), sightIds: ids.filter(Boolean) });
+  toast('Als Sichtung und Foto gespeichert');
   if (photoQueue.length) nextPhoto(); else closeTop('#sheetPhoto');
 });
-$('#btnPhotoShare').addEventListener('click', () => { const c = $('#photoCanvas'); c.toBlob((b) => { if (b) shareOrDownload(b, 'spotter-' + Date.now() + '.jpg', 'Safari Spotter Foto'); }, 'image/jpeg', 0.9); });
+$('#btnPhotoShare').addEventListener('click', async () => {
+  const c = $('#photoCanvas'); const b = await canvasToBlob(c, 0.9); if (!b || !photoCur) return;
+  const names = photoCur.dets.filter((d) => d.name && !d.other).map((d) => d.name);
+  const ex = photoCur.meta.exif; const sens = names.some(isSensitive);
+  let pos = ex && ex.lat != null ? (sens ? coarsen(ex.lat, ex.lon) : { lat: ex.lat, lon: ex.lon }) : positionFor(sens ? 'Nashorn' : (names[0] || ''));
+  const blob = await withExif(b, { t: ex && ex.time ? ex.time : Date.now(), lat: pos.lat, lon: pos.lon, desc: 'Safari Spotter: ' + (names.join(', ') || 'Bildanalyse') });
+  shareOrDownload(blob, 'spotter-' + Date.now() + '.jpg', 'Safari Spotter Foto');
+});
 $('#btnPhotoNext').addEventListener('click', () => nextPhoto());
 $('#fileGate').addEventListener('change', (e) => { if (e.target.files.length) analyzeFiles(e.target.files); e.target.value = ''; });
 $('#fileSettings').addEventListener('change', (e) => { if (e.target.files.length) { closeSheets(); analyzeFiles(e.target.files); } e.target.value = ''; });
@@ -1175,7 +1390,7 @@ function bindSettings() {
     const el = $(id); el.setAttribute('aria-checked', String(!!settings[key]));
     el.addEventListener('click', () => { settings[key] = !settings[key]; el.setAttribute('aria-checked', String(settings[key])); store.set('ss.settings', settings); if (onChange) onChange(settings[key]); });
   };
-  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn'); sw('#swCollect', 'collect');
+  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn'); sw('#swCollect', 'collect'); sw('#swSnapshots', 'snapshots');
   sw('#swGps', 'gps', (on) => { if (on) startGps(); else { stopGps(); if (trip.active) stopTrip(); } });
   const far = $('#far'); far.value = ['off', 'on', 'max'].includes(settings.far) ? settings.far : 'on';
   far.addEventListener('change', () => { settings.far = far.value; store.set('ss.settings', settings); });
@@ -1237,15 +1452,15 @@ window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); st
 
 /* ---------- Hochfahren ---------- */
 window.__spotter = {
-  state: () => ({ version: VERSION, head: !!head, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
+  state: () => ({ version: VERSION, head: !!head, photoCount, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
   fakeFix: (lat, lon, acc = 8) => onFix({ coords: { latitude: lat, longitude: lon, accuracy: acc } }),
-  analyzeFiles, logSighting, startTrip, stopTrip, exportRows: () => exportRows(), coarsen, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
+  analyzeFiles, logSighting, startTrip, stopTrip, exportRows: () => exportRows(), coarsen, snapshot: snapshotFrame, photos: () => idb.all('photos'), withExif, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
   dbg: { renameSighting, renderSightings, addCorrection, labelName, closeTop, toast, isSensitive, store, tracks: () => tracks, lockTrack: (i, name, key) => { const t = tracks[i]; t.locked = true; t.species = name; t.key = key; t.sure = true; t.other = false; t.conf = 1; return t.sightId; } }
 };
 bindSettings();
 renderSightings(); updateKmPill();
 if (trip.active) startGps();
-countReview();
+countReview(); countPhotos();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (async () => {
   try { await loadModels(); $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten'; }
