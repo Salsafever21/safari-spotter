@@ -57,7 +57,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* Top bar */
 .topbar {
   position: absolute; left: 0; right: 0; top: 0; z-index: 5;
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 8px 10px;
   padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
   padding-left: max(14px, env(safe-area-inset-left, 0px));
   padding-right: max(14px, env(safe-area-inset-right, 0px));
@@ -75,6 +75,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pill.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(155, 217, 111, 0.25); }
 .pill .fps { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
 .pill .km { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--accent); }
+.pill.act { justify-self: start; font-weight: 600; max-width: none; cursor: pointer; }
+#btnTrack.pill.act { justify-self: end; }
+.pill.act[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.pill.act[aria-pressed="true"] .km { color: var(--accent-ink); }
 .lens {
   appearance: none; -webkit-appearance: none;
   background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
@@ -226,6 +230,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .counts li:first-child { border-top: 0; }
 .counts .n { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tiles + .tiles { margin-top: 10px; }
+.counts li .sub { display: block; color: var(--muted); font-size: 12px; }
 .tile { background: var(--panel-2); border-radius: 12px; padding: 12px; }
 .tile b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .tile small { color: var(--muted); font-size: 12px; }
@@ -245,6 +251,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   max-width: calc(100% - 32px); text-align: center;
 }
 #map { height: 46vh; min-height: 240px; border-radius: 12px; background: #23271c; overflow: hidden; }
+#liveMap { height: 36vh; min-height: 200px; border-radius: 12px; background: #23271c; overflow: hidden; }
+.drivehead { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; align-items: end; }
+.drivehead b { display: block; font-size: 34px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.1; }
+.drivehead small { color: var(--muted); font-size: 12px; }
+.live-pos { width: 16px; height: 16px; border-radius: 50%; background: #5ec8f2; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(94,200,242,0.35); }
 .photo-pin { width: 46px !important; height: 46px !important; border-radius: 10px; overflow: hidden; border: 2px solid var(--fg); box-shadow: 0 2px 8px rgba(0,0,0,0.5); background: var(--panel-2); }
 .photo-pin img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .photo-pin.coarse { border-color: var(--rec); border-style: dashed; }
@@ -298,6 +309,14 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   <header class="topbar">
     <div class="pill" id="status"><span class="dot"></span><span id="statusText">Bereit</span><span class="km" id="kmPill" hidden></span><span class="fps" id="fps"></span></div>
     <select class="lens" id="lens" aria-label="Objektiv" hidden></select>
+    <button type="button" class="pill act" id="btnDrive" aria-pressed="false" hidden>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path id="driveIcon" d="M6 4l14 8-14 8z"/></svg>
+      <span id="driveText">Game Drive starten</span>
+    </button>
+    <button type="button" class="pill act" id="btnTrack" aria-pressed="false" hidden>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      <span id="trackText">Tracken</span>
+    </button>
   </header>
 
   <div class="zoom" id="zoomWrap" hidden>
@@ -402,20 +421,26 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
     </div>
 
     <div id="tabTrip" hidden>
+      <p class="small" id="tripTitle" style="margin-bottom:8px"></p>
       <div class="tiles">
         <div class="tile"><b id="trKm">0,0</b><small>km</small></div>
-        <div class="tile"><b id="trTime">0:00</b><small>Stunden</small></div>
-        <div class="tile"><b id="trSpeed">0</b><small>km/h Schnitt</small></div>
+        <div class="tile"><b id="trTime">0:00</b><small>Dauer</small></div>
+        <div class="tile"><b id="trSpeed">0</b><small>km/h in Fahrt</small></div>
+        <div class="tile"><b id="trStops">0</b><small>Stopps</small></div>
+        <div class="tile"><b id="trStill">0:00</b><small>Standzeit</small></div>
+        <div class="tile"><b id="trMax">0</b><small>km/h max</small></div>
       </div>
       <div class="actions" style="margin-top:12px">
-        <button type="button" class="main" id="btnTrip">Fahrt starten</button>
+        <button type="button" class="main" id="btnTrip">Game Drive starten</button>
         <button type="button" id="btnExportGpx">GPX exportieren</button>
       </div>
       <p class="small" id="tripNote" style="margin-top:10px">Die Aufzeichnung läuft, solange die App im Vordergrund ist. Nashorn-Sichtungen werden nur auf 10 km genau gespeichert, auch im Fahrtprotokoll.</p>
+      <h3>Stopps mit Sichtungen</h3>
+      <ul class="counts" id="stopList"></ul>
       <h3>Karte mit Route, Fotos und Sichtungen</h3>
       <div id="map"></div>
       <p class="small" id="mapInfo" style="margin-top:8px"></p>
-      <h3>Frühere Fahrten</h3>
+      <h3>Frühere Game Drives</h3>
       <ul class="counts" id="tripList"></ul>
     </div>
 
@@ -514,6 +539,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <button type="button" class="switch" id="swGps" role="switch" aria-checked="true" aria-label="Standort erfassen"></button>
     </div>
     <div class="row">
+      <div class="lbl">Tracken beim Kamerastart<small>Aus: Kamera zeigt nur das Bild, Erkennung erst per Knopf „Tracken“</small></div>
+      <button type="button" class="switch" id="swAutoTrack" role="switch" aria-checked="false" aria-label="Tracken beim Kamerastart"></button>
+    </div>
+    <div class="row">
       <div class="lbl">Schnappschuss bei Sichtung<small>Speichert bei jeder neuen Sichtung ein Foto mit Rahmen (ca. 0,2 MB)</small></div>
       <button type="button" class="switch" id="swSnapshots" role="switch" aria-checked="true" aria-label="Schnappschuss bei Sichtung"></button>
     </div>
@@ -547,6 +576,40 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <a id="btnSaveClip" class="prim" style="flex:1 1 140px;min-height:46px;border-radius:12px;background:var(--line);color:var(--fg);font-size:15px;text-decoration:none" download>In Dateien speichern</a>
       <button type="button" class="danger" id="btnDiscardClip">Verwerfen</button>
     </div>
+  </section>
+
+  <!-- Game Drive live -->
+  <section class="sheet" id="sheetDrive" hidden aria-label="Game Drive">
+    <div class="grip"></div>
+    <header><h2 id="driveTitle">Game Drive</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="drivehead">
+      <div><b id="dvTime">0:00:00</b><small>Dauer</small></div>
+      <div><b id="dvKm">0,0</b><small>km</small></div>
+      <div><b id="dvSpeed">0</b><small>km/h jetzt</small></div>
+    </div>
+    <p class="small" id="dvState" style="margin:6px 0 10px"></p>
+    <div id="liveMap"></div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" id="btnLiveCenter">Zentrieren</button>
+      <button type="button" class="danger" id="btnDriveStop">Game Drive beenden</button>
+    </div>
+    <div class="tiles" style="margin-top:12px">
+      <div class="tile"><b id="dvMoving">0:00</b><small>in Fahrt</small></div>
+      <div class="tile"><b id="dvStill">0:00</b><small>Standzeit</small></div>
+      <div class="tile"><b id="dvStops">0</b><small>Stopps</small></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><b id="dvAvg">0</b><small>km/h in Fahrt</small></div>
+      <div class="tile"><b id="dvMax">0</b><small>km/h max</small></div>
+      <div class="tile"><b id="dvElev">0</b><small>Höhenmeter</small></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><b id="dvSight">0</b><small>Tiere gesichtet</small></div>
+      <div class="tile"><b id="dvSpecies">0</b><small>Arten</small></div>
+      <div class="tile"><b id="dvPhotos">0</b><small>Fotos</small></div>
+    </div>
+    <h3>Kilometer-Splits</h3>
+    <ul class="counts" id="splitList"></ul>
   </section>
 
   <!-- Vollbild-Viewer -->
