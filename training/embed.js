@@ -29,17 +29,22 @@ function localHandler(modelJsonPath) {
 
 // Varianten pro Bild: Vollbild, gespiegelt, zentrierter Ausschnitt (wie ein enger Detektorrahmen), gespiegelter Ausschnitt
 function variants(img) {
-  const [h, w] = img.shape;
-  const s = Math.min(h, w);
-  const center = tf.image.cropAndResize(img.expandDims(0).toFloat(), [[(h - s) / 2 / h, (w - s) / 2 / w, (h + s) / 2 / h, (w + s) / 2 / w]], [0], [224, 224]).squeeze();
-  const tight = tf.image.cropAndResize(img.expandDims(0).toFloat(), [[0.12, 0.12, 0.88, 0.88]], [0], [224, 224]).squeeze();
-  const flip = (t) => tf.reverse(t, 1);
-  return [center, flip(center), tight, flip(tight)];
+  return tf.tidy(() => {
+    const [h, w] = img.shape;
+    const s = Math.min(h, w);
+    const batch = img.expandDims(0).toFloat();
+    const center = tf.image.cropAndResize(batch, [[(h - s) / 2 / h, (w - s) / 2 / w, (h + s) / 2 / h, (w + s) / 2 / w]], [0], [224, 224]);
+    const tight = tf.image.cropAndResize(batch, [[0.12, 0.12, 0.88, 0.88]], [0], [224, 224]);
+    const flip = (t) => tf.reverse(t, 2);
+    return tf.concat([center, flip(center), tight, flip(tight)], 0).toInt(); // [4,224,224,3]
+  });
 }
 
 (async () => {
   const model = await mobilenet.load({ version: 2, alpha: 1.0, modelUrl: localHandler(path.join(SITE, 'models/mobilenet/model.json')), inputRange: [0, 1] });
-  const items = [], chunks = [];
+  const BIN = OUT.replace(/\.json$/, '.bin');
+  const fd = fs.openSync(BIN, 'w');
+  const items = [];
   let dim = 0, n = 0;
   const t0 = Date.now();
   for (const c of spec.classes) {
@@ -51,22 +56,21 @@ function variants(img) {
       let img;
       try { img = tf.node.decodeImage(fs.readFileSync(path.join(dir, f)), 3); } catch (e) { continue; }
       if (img.shape.length !== 3 || img.shape[0] < 64 || img.shape[1] < 64) { img.dispose(); continue; }
-      const vs = variants(img);
-      const embs = tf.tidy(() => model.infer(tf.stack(vs).toInt(), true));
+      const vs = variants(img); img.dispose();
+      const embs = tf.tidy(() => model.infer(vs, true));
+      vs.dispose();
       const data = await embs.data();
       dim = embs.shape[1];
-      for (let v = 0; v < vs.length; v++) {
-        chunks.push(Float32Array.from(data.subarray(v * dim, (v + 1) * dim)));
-        items.push({ cls: c.key, file: c.key + '/' + f, variant: v, obs: (manifest[c.key + '/' + f] || {}).observation || 0 });
-      }
-      embs.dispose(); vs.forEach((t) => t.dispose()); img.dispose();
+      const nv = embs.shape[0];
+      embs.dispose();
+      fs.writeSync(fd, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+      for (let v = 0; v < nv; v++) items.push({ cls: c.key, file: c.key + '/' + f, variant: v, obs: (manifest[c.key + '/' + f] || {}).observation || 0 });
       okFiles++; n++;
-      if (n % 500 === 0) console.log(n, 'Bilder,', ((Date.now() - t0) / 1000).toFixed(0), 's');
+      if (n % 1000 === 0) console.log(n, 'Bilder,', ((Date.now() - t0) / 1000).toFixed(0), 's, Tensoren im Speicher:', tf.memory().numTensors);
     }
     console.log(c.key.padEnd(22), okFiles, 'Bilder');
   }
-  const all = new Float32Array(chunks.length * dim);
-  chunks.forEach((c, i) => all.set(c, i * dim));
-  fs.writeFileSync(OUT, JSON.stringify({ dim, items, emb: Buffer.from(all.buffer).toString('base64') }));
-  console.log('fertig:', items.length, 'Vektoren ×', dim, 'in', ((Date.now() - t0) / 1000).toFixed(0), 's ->', OUT);
+  fs.closeSync(fd);
+  fs.writeFileSync(OUT, JSON.stringify({ dim, count: items.length, bin: path.basename(BIN), items }));
+  console.log('fertig:', items.length, 'Vektoren ×', dim, 'in', ((Date.now() - t0) / 1000).toFixed(0), 's ->', OUT, '+', BIN);
 })().catch((e) => { console.error(e); process.exit(1); });

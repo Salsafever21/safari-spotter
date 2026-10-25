@@ -12,9 +12,10 @@ const idx = Object.fromEntries(classes.map((k, i) => [k, i]));
 
 const raw = JSON.parse(fs.readFileSync(EMB, 'utf8'));
 const dim = raw.dim;
-const buf = Buffer.from(raw.emb, 'base64');
+const buf = fs.readFileSync(path.join(path.dirname(EMB), raw.bin));
 const all = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
 const items = raw.items;
+if (all.length !== items.length * dim) throw new Error('Embedding-Datei passt nicht zum Index: ' + all.length + ' vs ' + items.length * dim);
 
 // Split nach Beobachtung (alle Varianten eines Fotos landen auf derselben Seite), 15 % Validierung
 function hash(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
