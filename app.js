@@ -1,7 +1,7 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
@@ -70,7 +70,7 @@ const idb = {
 };
 
 /* ---------- Zustand ---------- */
-const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true, snapshots: true }, store.get('ss.settings', {}));
+const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true, snapshots: true, autoTrack: false }, store.get('ss.settings', {}));
 // Einmalige Umstellung alter Installationen auf 4K (vorher Standard 720p)
 if (!settings.res4k) { if (settings.res === '720') settings.res = '2160'; settings.res4k = true; store.set('ss.settings', settings); }
 let sightings = store.get('ss.sightings', []);
@@ -95,7 +95,7 @@ let zoom = 1, hwZoom = null;
 let tracks = [], nextId = 1, detFps = 0, sightSeq = 0;
 let recorder = null, chunks = [], recStart = 0, recTimerId = 0, micStream = null, recMime = '', isRecording = false, recMap = null, lastClip = null, recStamp = '';
 let wakeLock = null;
-let gpsWatch = null, lastFix = null, autoRegion = null;
+let gpsWatch = null, lastFix = null, autoRegion = null, tracking = false;
 let reviewCount = 0, corrCtx = null, photoQueue = [], photoCur = null, map = null, mapLayers = null, activeTab = 'list';
 
 /* ---------- UI-Helfer ---------- */
@@ -315,7 +315,7 @@ function startGps() {
 function stopGps() { if (gpsWatch != null && navigator.geolocation) navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; $('#gpsState').textContent = 'GPS aus'; }
 function onFix(pos) {
   const c = pos.coords;
-  lastFix = { lat: c.latitude, lon: c.longitude, acc: c.accuracy || 999, t: Date.now() };
+  lastFix = { lat: c.latitude, lon: c.longitude, acc: c.accuracy || 999, t: Date.now(), spd: typeof c.speed === 'number' && c.speed >= 0 ? c.speed : -1, alt: typeof c.altitude === 'number' ? Math.round(c.altitude) : null };
   $('#gpsState').textContent = 'GPS ±' + Math.round(lastFix.acc) + ' m';
   updateAutoRegion();
   if (trip.active) addTrackPoint(lastFix);
@@ -348,48 +348,138 @@ function applyPrior(probs) {
   const sum = out.reduce((a, b) => a + b, 0) || 1;
   return out.map((p) => p / sum);
 }
-// Fahrtaufzeichnung
+/* ---------- Game Drive: Aufzeichnung wie eine Sport-App ---------- */
+// Punkt: [t, lat, lon, speed m/s (-1 unbekannt), alt m (null unbekannt)]
+const STILL_SPEED = 0.6;     // m/s, darunter gilt: steht (etwa 2 km/h)
+const STOP_MIN = 45000;      // ms Stillstand, ab dem ein Stopp gezählt wird
 function addTrackPoint(fix) {
   const pts = trip.points, last = pts[pts.length - 1];
   const here = { lat: fix.lat, lon: fix.lon };
   if (last) {
     const d = haversine({ lat: last[1], lon: last[2] }, here);
-    if (d < 8 && fix.t - last[0] < 20000) return;
-    if (fix.acc <= 60 && d >= 8 && d < 2000) trip.dist += d;
+    if (d < 10 && fix.t - last[0] < 15000) return;
+    if (fix.acc <= 60 && d >= 10 && d < 2000) trip.dist += d;
   }
-  pts.push([fix.t, Math.round(fix.lat * 1e5) / 1e5, Math.round(fix.lon * 1e5) / 1e5]);
-  if (pts.length > 6000) pts.splice(0, pts.length - 6000);
+  pts.push([fix.t, Math.round(fix.lat * 1e5) / 1e5, Math.round(fix.lon * 1e5) / 1e5, fix.spd >= 0 ? Math.round(fix.spd * 10) / 10 : -1, fix.alt]);
+  if (pts.length > 20000) pts.splice(0, pts.length - 20000);
   if (pts.length % 5 === 0) store.set('ss.trip', trip);
-  updateKmPill();
+  updateDriveLive();
 }
-function updateKmPill() { const p = $('#kmPill'); p.hidden = !trip.active; if (trip.active) p.textContent = fmtKm(trip.dist) + ' km'; }
+// Statistik aus den Punkten: Distanz, Dauer, Fahr- und Standzeit, Stopps, Geschwindigkeiten, Höhenmeter, Splits
+function tripStats(tr) {
+  const pts = tr.points || [], endT = tr.active ? Date.now() : (tr.endedAt || (pts.length ? pts[pts.length - 1][0] : tr.startedAt));
+  const st = { dist: tr.dist || 0, dur: Math.max(0, endT - tr.startedAt), moving: 0, standing: 0, stops: [], maxSpeed: 0, avgMoving: 0, elev: 0, splits: [], sightings: [], photos: 0 };
+  let stillSince = null, stillLat = 0, stillLon = 0, refAlt = null, acc = 0, nextSplit = 1000, splitStart = tr.startedAt;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dt = b[0] - a[0]; if (dt <= 0) continue;
+    const d = haversine({ lat: a[1], lon: a[2] }, { lat: b[1], lon: b[2] });
+    const v = d / (dt / 1000);
+    const gpsV = b[3] >= 0 ? b[3] : -1;
+    // GPS-Tempo bevorzugen, ausser der Ort ändert sich über längere Zeit nicht (dann steht das Fahrzeug, egal was der Empfänger meldet)
+    const speed = (gpsV >= 0 && !(d < 5 && dt > 10000)) ? gpsV : v;
+    if (speed < STILL_SPEED) {
+      st.standing += dt;
+      if (stillSince == null) { stillSince = a[0]; stillLat = a[1]; stillLon = a[2]; }
+    } else {
+      st.moving += dt;
+      if (stillSince != null) { if (a[0] - stillSince >= STOP_MIN) st.stops.push({ t0: stillSince, t1: a[0], dur: a[0] - stillSince, lat: stillLat, lon: stillLon }); stillSince = null; }
+      if (dt >= 3000 && v < 45) st.maxSpeed = Math.max(st.maxSpeed, v);
+    }
+    if (d < 2000) { acc += d; if (acc >= nextSplit) { st.splits.push({ km: nextSplit / 1000, time: b[0] - splitStart, at: b[0] }); splitStart = b[0]; nextSplit += 1000; } }
+    if (b[4] != null) { if (refAlt == null) refAlt = b[4]; else if (b[4] - refAlt >= 5) { st.elev += b[4] - refAlt; refAlt = b[4]; } else if (refAlt - b[4] >= 5) refAlt = b[4]; }
+  }
+  if (stillSince != null) { const t1 = endT; if (t1 - stillSince >= STOP_MIN) st.stops.push({ t0: stillSince, t1, dur: t1 - stillSince, lat: stillLat, lon: stillLon, open: tr.active }); }
+  st.avgMoving = st.moving > 30000 ? st.dist / (st.moving / 1000) : 0;
+  st.sightings = sightings.filter((x) => x.t >= tr.startedAt && x.t <= endT);
+  st.stops.forEach((sp) => { sp.sightings = st.sightings.filter((x) => x.t >= sp.t0 - 60000 && x.t <= sp.t1 + 60000); });
+  return st;
+}
+const kmh = (ms) => Math.round(ms * 3.6);
+function fmtClock(ms) { const sec = Math.max(0, Math.floor(ms / 1000)); return Math.floor(sec / 3600) + ':' + pad2(Math.floor(sec / 60) % 60) + ':' + pad2(sec % 60); }
+function updateKmPill() {
+  const b = $('#btnDrive'); if (!b) return;
+  b.setAttribute('aria-pressed', String(trip.active));
+  $('#driveIcon').setAttribute('d', trip.active ? 'M6 6h12v12H6z' : 'M6 4l14 8-14 8z');
+  $('#driveText').textContent = trip.active ? fmtKm(trip.dist) + ' km · ' + fmtDur(Date.now() - trip.startedAt) : 'Game Drive starten';
+  $('#kmPill').hidden = true;
+}
 function startTrip() {
   trip = { active: true, startedAt: Date.now(), points: [], dist: 0 }; store.set('ss.trip', trip);
   if (!settings.gps) { settings.gps = true; store.set('ss.settings', settings); $('#swGps').setAttribute('aria-checked', 'true'); }
-  startGps(); updateKmPill(); renderTrip(); toast('Fahrt gestartet');
+  startGps(); updateKmPill(); renderTrip(); toast('Game Drive gestartet');
 }
 function stopTrip() {
   if (!trip.active) return;
-  const done = { startedAt: trip.startedAt, endedAt: Date.now(), dist: trip.dist, points: trip.points, sightings: sightings.filter((s) => s.t >= trip.startedAt).reduce((a, s) => a + (s.n || 1), 0) };
+  const stats = tripStats(trip);
+  const done = { startedAt: trip.startedAt, endedAt: Date.now(), dist: trip.dist, points: trip.points, sightings: stats.sightings.reduce((a, s) => a + (s.n || 1), 0) };
   trips.unshift(done); trips = trips.slice(0, 7); store.set('ss.trips', trips);
   trip = { active: false, startedAt: 0, points: [], dist: 0 }; store.set('ss.trip', trip);
-  updateKmPill(); renderTrip(); toast('Fahrt beendet: ' + fmtKm(done.dist) + ' km');
+  updateKmPill(); renderTrip(); closeTop('#sheetDrive');
+  toast('Game Drive beendet: ' + fmtKm(done.dist) + ' km, ' + fmtDur(done.endedAt - done.startedAt) + ' h, ' + done.sightings + ' Tiere', 4000);
+  renderSightings(); openSheet('#sheetSightings'); showTab('trip');
 }
 $('#btnTrip').addEventListener('click', () => { if (trip.active) stopTrip(); else startTrip(); });
+$('#btnDriveStop').addEventListener('click', stopTrip);
+$('#btnDrive').addEventListener('click', () => { if (!trip.active) startTrip(); openDrivePanel(); });
 function renderTrip() {
   const active = trip.active;
   const src = active ? trip : trips[0];
-  const dist = src ? src.dist : 0;
-  const dur = src ? ((active ? Date.now() : src.endedAt) - src.startedAt) : 0;
-  $('#trKm').textContent = fmtKm(dist); $('#trTime').textContent = fmtDur(dur);
-  $('#trSpeed').textContent = dur > 60000 ? String(Math.round(dist / 1000 / (dur / 3600000))) : '0';
-  $('#btnTrip').textContent = active ? 'Fahrt beenden' : 'Fahrt starten';
+  const st = src ? tripStats(src) : null;
+  $('#tripTitle').textContent = !src ? 'Noch kein Game Drive aufgezeichnet.' : (active ? 'Läuft seit ' + fmtTime(src.startedAt) : 'Letzter Game Drive: ' + fmtDate(src.startedAt) + ' ' + fmtTime(src.startedAt) + ' bis ' + fmtTime(src.endedAt));
+  $('#trKm').textContent = fmtKm(st ? st.dist : 0); $('#trTime').textContent = fmtDur(st ? st.dur : 0);
+  $('#trSpeed').textContent = st ? String(kmh(st.avgMoving)) : '0';
+  $('#trStops').textContent = st ? String(st.stops.length) : '0'; $('#trStill').textContent = fmtDur(st ? st.standing : 0); $('#trMax').textContent = st ? String(kmh(st.maxSpeed)) : '0';
+  $('#btnTrip').textContent = active ? 'Game Drive beenden' : 'Game Drive starten';
   $('#btnTrip').classList.toggle('main', !active);
+  const sl = $('#stopList'); sl.innerHTML = '';
+  if (!st || !st.stops.length) sl.innerHTML = '<li><span class="small">' + (st ? 'Keine Stopps über 45 Sekunden.' : '') + '</span></li>';
+  else st.stops.forEach((sp, i) => { const li = document.createElement('li'); li.innerHTML = '<span>Stopp ' + (i + 1) + ' · ' + esc(fmtTime(sp.t0)) + (sp.open ? ' (läuft)' : '') + '<span class="sub">' + (sp.sightings.length ? esc(sp.sightings.map((x) => x.s + (x.n > 1 ? ' ' + x.n + '×' : '')).join(', ')) : 'keine Sichtung') + '</span></span><span class="n">' + fmtDur(sp.dur) + ' h</span>'; sl.appendChild(li); });
   const ul = $('#tripList'); ul.innerHTML = '';
-  if (!trips.length) ul.innerHTML = '<li><span class="small">Noch keine abgeschlossene Fahrt.</span></li>';
-  trips.forEach((t) => { const li = document.createElement('li'); li.innerHTML = '<span>' + esc(fmtDate(t.startedAt)) + ' ' + esc(fmtTime(t.startedAt)) + ' bis ' + esc(fmtTime(t.endedAt)) + ' · ' + t.sightings + ' Tiere</span><span class="n">' + fmtKm(t.dist) + ' km</span>'; ul.appendChild(li); });
+  if (!trips.length) ul.innerHTML = '<li><span class="small">Noch kein abgeschlossener Game Drive.</span></li>';
+  trips.forEach((t) => { const x = tripStats(t); const li = document.createElement('li'); li.innerHTML = '<span>' + esc(fmtDate(t.startedAt)) + ' ' + esc(fmtTime(t.startedAt)) + ' bis ' + esc(fmtTime(t.endedAt)) + '<span class="sub">' + t.sightings + ' Tiere · ' + x.stops.length + ' Stopps · ' + fmtDur(x.standing) + ' h Stand · Ø ' + kmh(x.avgMoving) + ' km/h</span></span><span class="n">' + fmtKm(t.dist) + ' km</span>'; ul.appendChild(li); });
 }
-
+// Live-Ansicht während der Fahrt
+let liveMap = null, livePoly = null, livePos = null, liveFollow = true, liveTimer = 0;
+function openDrivePanel() {
+  openSheet('#sheetDrive');
+  if (typeof L !== 'undefined' && !liveMap) {
+    liveMap = L.map('liveMap', { zoomControl: false, attributionControl: true });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(liveMap);
+    livePoly = L.polyline([], { color: '#f0a93a', weight: 5, opacity: 0.95 }).addTo(liveMap);
+    livePos = L.marker([0, 0], { icon: L.divIcon({ className: 'live-pos', iconSize: [16, 16] }) }).addTo(liveMap);
+    liveMap.on('dragstart', () => { liveFollow = false; });
+    liveMap.setView(lastFix ? [lastFix.lat, lastFix.lon] : [-25, 31], lastFix ? 15 : 6);
+  }
+  if (liveMap) { setTimeout(() => liveMap.invalidateSize(), 60); liveFollow = true; }
+  clearInterval(liveTimer); liveTimer = setInterval(updateDriveLive, 1000);
+  updateDriveLive();
+}
+$('#btnLiveCenter').addEventListener('click', () => { liveFollow = true; updateDriveLive(); });
+function updateDriveLive() {
+  updateKmPill();
+  if ($('#sheetDrive').hidden) { clearInterval(liveTimer); liveTimer = 0; return; }
+  const src = trip.active ? trip : null;
+  if (!src) { $('#dvState').textContent = 'Kein Game Drive aktiv.'; return; }
+  const st = tripStats(src);
+  const lastPt = src.points[src.points.length - 1];
+  const nowSpeed = lastFix && Date.now() - lastFix.t < 15000 ? (lastFix.spd >= 0 ? lastFix.spd : (src.points.length > 1 ? haversine({ lat: src.points[src.points.length - 2][1], lon: src.points[src.points.length - 2][2] }, { lat: lastPt[1], lon: lastPt[2] }) / Math.max(1, (lastPt[0] - src.points[src.points.length - 2][0]) / 1000) : 0)) : 0;
+  const paused = st.stops.length && st.stops[st.stops.length - 1].open;
+  $('#dvTime').textContent = fmtClock(st.dur); $('#dvKm').textContent = fmtKm(st.dist); $('#dvSpeed').textContent = String(kmh(nowSpeed));
+  $('#dvState').textContent = (paused ? 'Auto-Pause: steht seit ' + fmtDur(st.stops[st.stops.length - 1].dur) + ' h' : nowSpeed < STILL_SPEED ? 'Steht' : 'In Fahrt') + (lastFix ? ' · GPS ±' + Math.round(lastFix.acc) + ' m' : ' · wartet auf GPS') + (currentRegion() ? ' · ' + currentRegion().name : '');
+  $('#dvMoving').textContent = fmtDur(st.moving); $('#dvStill').textContent = fmtDur(st.standing); $('#dvStops').textContent = String(st.stops.length);
+  $('#dvAvg').textContent = String(kmh(st.avgMoving)); $('#dvMax').textContent = String(kmh(st.maxSpeed)); $('#dvElev').textContent = String(Math.round(st.elev));
+  $('#dvSight').textContent = String(st.sightings.reduce((a, x) => a + (x.n || 1), 0)); $('#dvSpecies').textContent = String(new Set(st.sightings.map((x) => x.s)).size);
+  $('#dvPhotos').textContent = String(galleryItems.filter((p) => p.t >= src.startedAt).length || '0');
+  const sl = $('#splitList'); sl.innerHTML = '';
+  if (!st.splits.length) sl.innerHTML = '<li><span class="small">Noch kein voller Kilometer.</span></li>';
+  st.splits.forEach((sp) => { const li = document.createElement('li'); li.innerHTML = '<span>km ' + sp.km + ' · ' + esc(fmtTime(sp.at)) + '</span><span class="n">' + fmtClock(sp.time).replace(/^0:/, '') + ' · ' + Math.round(3600 / Math.max(1, sp.time / 1000)) + ' km/h</span>'; sl.appendChild(li); });
+  if (liveMap) {
+    const latlngs = src.points.map((p) => [p[1], p[2]]);
+    livePoly.setLatLngs(latlngs);
+    if (lastFix) { livePos.setLatLng([lastFix.lat, lastFix.lon]); if (liveFollow) liveMap.setView([lastFix.lat, lastFix.lon], Math.max(liveMap.getZoom(), 14), { animate: false }); }
+  }
+}
 /* ---------- Karte ---------- */
 async function renderMap() {
   if (typeof L === 'undefined') return;
@@ -823,7 +913,7 @@ $('#btnClearCorr').addEventListener('click', async () => {
 });
 // Tipp auf einen Rahmen im Kamerabild
 viewportEl.addEventListener('click', (ev) => {
-  if (!running || !syncCanvases()) return;
+  if (!running || !tracking || !syncCanvases()) return;
   const r = viewportEl.getBoundingClientRect(), reg = visibleRegion();
   const vx = reg.x + ((ev.clientX - r.left) / r.width) * reg.w, vy = reg.y + ((ev.clientY - r.top) / r.height) * reg.h;
   const slack = 24 / reg.cssScale;
@@ -1230,8 +1320,16 @@ $('#btnPhoto').addEventListener('click', async () => {
 });
 
 /* ---------- Erkennungsschleife ---------- */
+function setTracking(on) {
+  tracking = !!on;
+  const b = $('#btnTrack'); b.setAttribute('aria-pressed', String(tracking)); $('#trackText').textContent = tracking ? 'Tracking läuft' : 'Tracken';
+  if (!tracking) { tracks = []; hint = null; hintRuns = []; octx.clearRect(0, 0, overlay.width, overlay.height); setStatus('Tracken aus', false); $('#fps').textContent = ''; }
+  else setStatus('Suche Tiere …', true);
+}
+$('#btnTrack').addEventListener('click', () => { setTracking(!tracking); toast(tracking ? 'Erkennung läuft' : 'Erkennung pausiert, Kamera bleibt an'); });
 async function detectLoop() {
   while (running) {
+    if (!tracking) { await sleep(200); continue; }
     if (!syncCanvases() || video.paused) { await sleep(60); continue; }
     const t0 = performance.now();
     const reg = visibleRegion();
@@ -1314,6 +1412,8 @@ function render() {
     rctx.textAlign = 'left';
   }
   if (++fpsTick % 15 === 0) {
+    if (!tracking) { if (fpsTick % 60 === 0) updateKmPill(); return; }
+    if (fpsTick % 60 === 0) updateKmPill();
     const n = tracks.filter(isShown).length;
     $('#fps').textContent = Math.round(detFps) + ' fps';
     const hinting = n === 0 && hint && performance.now() < hint.until;
@@ -1390,7 +1490,7 @@ function bindSettings() {
     const el = $(id); el.setAttribute('aria-checked', String(!!settings[key]));
     el.addEventListener('click', () => { settings[key] = !settings[key]; el.setAttribute('aria-checked', String(settings[key])); store.set('ss.settings', settings); if (onChange) onChange(settings[key]); });
   };
-  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn'); sw('#swCollect', 'collect'); sw('#swSnapshots', 'snapshots');
+  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn'); sw('#swCollect', 'collect'); sw('#swSnapshots', 'snapshots'); sw('#swAutoTrack', 'autoTrack');
   sw('#swGps', 'gps', (on) => { if (on) startGps(); else { stopGps(); if (trip.active) stopTrip(); } });
   const far = $('#far'); far.value = ['off', 'on', 'max'].includes(settings.far) ? settings.far : 'on';
   far.addEventListener('change', () => { settings.far = far.value; store.set('ss.settings', settings); });
@@ -1431,7 +1531,8 @@ async function startAll() {
   running = true;
   $('#gate').hidden = true;
   $('#btnRecord').disabled = false; $('#btnPhoto').disabled = false;
-  setStatus('Suche Tiere …', true);
+  $('#btnDrive').hidden = false; $('#btnTrack').hidden = false;
+  setTracking(!!settings.autoTrack); updateKmPill();
   keepAwake(); startGps();
   requestAnimationFrame(render);
   detectLoop();
@@ -1441,6 +1542,7 @@ function stopAll() {
   running = false; stopStream(); tracks = [];
   octx.clearRect(0, 0, overlay.width, overlay.height);
   $('#btnRecord').disabled = true; $('#btnPhoto').disabled = true;
+  $('#btnDrive').hidden = true; $('#btnTrack').hidden = true; tracking = false;
   $('#zoomWrap').hidden = true; $('#lens').hidden = true;
   setStatus('Bereit', false); $('#fps').textContent = '';
   $('#gate').hidden = false;
@@ -1452,9 +1554,10 @@ window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); st
 
 /* ---------- Hochfahren ---------- */
 window.__spotter = {
-  state: () => ({ version: VERSION, head: !!head, photoCount, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
-  fakeFix: (lat, lon, acc = 8) => onFix({ coords: { latitude: lat, longitude: lon, accuracy: acc } }),
-  analyzeFiles, logSighting, startTrip, stopTrip, exportRows: () => exportRows(), coarsen, snapshot: snapshotFrame, photos: () => idb.all('photos'), withExif, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
+  state: () => ({ version: VERSION, head: !!head, photoCount, tracking, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
+  fakeFix: (lat, lon, acc = 8, spd, alt) => onFix({ coords: { latitude: lat, longitude: lon, accuracy: acc, speed: spd, altitude: alt } }),
+  injectTrack: (points) => { if (!trip.active) return false; trip.points = points.slice(); trip.dist = 0; if (points.length && points[0][0] < trip.startedAt) trip.startedAt = points[0][0] - 5000; for (let i = 1; i < points.length; i++) { const d = haversine({ lat: points[i - 1][1], lon: points[i - 1][2] }, { lat: points[i][1], lon: points[i][2] }); if (d >= 10 && d < 2000) trip.dist += d; } store.set('ss.trip', trip); updateDriveLive(); return true; },
+  analyzeFiles, logSighting, startTrip, stopTrip, setTracking, tripStats: () => tripStats(trip.active ? trip : (trips[0] || { points: [], startedAt: 0 })), exportRows: () => exportRows(), coarsen, snapshot: snapshotFrame, photos: () => idb.all('photos'), withExif, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
   dbg: { renameSighting, renderSightings, addCorrection, labelName, closeTop, toast, isSensitive, store, tracks: () => tracks, lockTrack: (i, name, key) => { const t = tracks[i]; t.locked = true; t.species = name; t.key = key; t.sure = true; t.other = false; t.conf = 1; return t.sightId; } }
 };
 bindSettings();
