@@ -1,7 +1,8 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
+let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -64,7 +65,9 @@ const idb = {
 };
 
 /* ---------- Zustand ---------- */
-const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '720', region: 'auto', gps: true, collect: true }, store.get('ss.settings', {}));
+const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true }, store.get('ss.settings', {}));
+// Einmalige Umstellung alter Installationen auf 4K (vorher Standard 720p)
+if (!settings.res4k) { if (settings.res === '720') settings.res = '2160'; settings.res4k = true; store.set('ss.settings', settings); }
 let sightings = store.get('ss.sightings', []);
 if (!Array.isArray(sightings)) sightings = [];
 sightings.forEach((e, i) => { if (!e.id) e.id = 'm' + i + '-' + e.t; if (!e.n) e.n = 1; });
@@ -203,7 +206,8 @@ function openProfile(keyOrName) {
 function stopStream() { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } }
 async function startCamera(deviceId) {
   stopStream();
-  const w = settings.res === '1080' ? 1920 : 1280, h = settings.res === '1080' ? 1080 : 720;
+  const RES = { '720': [1280, 720], '1080': [1920, 1080], '2160': [3840, 2160] };
+  const [w, h] = RES[settings.res] || RES['2160'];
   const vc = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } };
   Object.assign(vc, { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } });
   stream = await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
@@ -213,6 +217,7 @@ async function startCamera(deviceId) {
   const s = track.getSettings ? track.getSettings() : {};
   currentDeviceId = s.deviceId || deviceId || null;
   setupZoom(track);
+  showCamRes();
   await listLenses();
 }
 function lensName(label, i) {
@@ -263,10 +268,21 @@ function visibleRegion() {
   const w = Math.min(vw, W / (s * z)), h = Math.min(vh, H / (s * z));
   return { x: (vw - w) / 2, y: (vh - h) / 2, w, h, cssScale: s * z };
 }
+function showCamRes() {
+  const el = $('#camRes'); if (!el) return;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  el.textContent = vw && vh ? 'Kamera ' + vw + '×' + vh + (vw >= 3800 ? ' (4K)' : '') : 'Kamera aus';
+}
+// Overlay-Canvas: Videokoordinaten × ovK, begrenzt auf OVERLAY_MAX Pixel Breite
+let ovK = 1;
+video.addEventListener('resize', showCamRes);
+video.addEventListener('loadedmetadata', showCamRes);
 function syncCanvases() {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return false;
-  if (overlay.width !== vw || overlay.height !== vh) { overlay.width = vw; overlay.height = vh; }
+  ovK = Math.min(1, OVERLAY_MAX / vw);
+  const ow = Math.round(vw * ovK), oh = Math.round(vh * ovK);
+  if (overlay.width !== ow || overlay.height !== oh) { overlay.width = ow; overlay.height = oh; }
   return true;
 }
 
@@ -1066,9 +1082,9 @@ function render() {
   if (!running) return;
   requestAnimationFrame(render);
   if (!syncCanvases()) return;
-  const reg = visibleRegion(), px = 1 / reg.cssScale;
+  const reg = visibleRegion(), px = ovK / reg.cssScale;
   octx.clearRect(0, 0, overlay.width, overlay.height);
-  drawOverlay(octx, { ox: 0, oy: 0, k: 1, x0: reg.x, y0: reg.y, w: reg.w, h: reg.h }, px);
+  drawOverlay(octx, { ox: 0, oy: 0, k: ovK, x0: reg.x * ovK, y0: reg.y * ovK, w: reg.w * ovK, h: reg.h * ovK }, px);
   if (isRecording && settings.burnIn && recMap) {
     const RW = recCanvas.width, RH = recCanvas.height;
     let cw = reg.w, ch = cw * RH / RW; if (ch > reg.h) { ch = reg.h; cw = ch * RW / RH; }
@@ -1102,7 +1118,7 @@ async function startRecording() {
   const reg = visibleRegion();
   let ms;
   if (settings.burnIn) {
-    const RW = Math.min(1280, Math.round(reg.w)) & ~1, RH = Math.round(RW * reg.h / reg.w) & ~1;
+    const RW = Math.min(1920, Math.round(reg.w)) & ~1, RH = Math.round(RW * reg.h / reg.w) & ~1;
     recCanvas.width = RW; recCanvas.height = RH; recMap = { RW, RH };
     rctx.drawImage(video, reg.x, reg.y, reg.w, reg.h, 0, 0, RW, RH);
     ms = recCanvas.captureStream(30);
@@ -1165,7 +1181,10 @@ function bindSettings() {
   far.addEventListener('change', () => { settings.far = far.value; store.set('ss.settings', settings); });
   $('#region').addEventListener('change', (e) => { settings.region = e.target.value; store.set('ss.settings', settings); updateRegionNote(); });
   const res = $('#res'); res.value = settings.res;
-  res.addEventListener('change', () => { settings.res = res.value; store.set('ss.settings', settings); toast('Gilt ab dem nächsten Kamerastart'); });
+  res.addEventListener('change', async () => {
+    settings.res = res.value; store.set('ss.settings', settings);
+    if (running) { try { await startCamera(currentDeviceId); toast('Kamera neu gestartet'); } catch (e) { toast('Auflösung konnte nicht gesetzt werden'); } }
+  });
   $('#ver').textContent = 'v' + VERSION;
   $('#btnSettings').addEventListener('click', () => { updateRegionNote(); openSheet('#sheetSettings'); });
   $('#btnReload').addEventListener('click', async () => {
@@ -1220,7 +1239,7 @@ window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); st
 window.__spotter = {
   state: () => ({ version: VERSION, head: !!head, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits, locked: t.locked })), hint, hintRuns: hintRuns.slice(), detFps, sightings, trip: { active: trip.active, dist: trip.dist, points: trip.points.length }, region: (currentRegion() || {}).key || null, lastFix, reviewCount }),
   fakeFix: (lat, lon, acc = 8) => onFix({ coords: { latitude: lat, longitude: lon, accuracy: acc } }),
-  analyzeFiles, logSighting, startTrip, stopTrip, exportRows: () => exportRows(), coarsen,
+  analyzeFiles, logSighting, startTrip, stopTrip, exportRows: () => exportRows(), coarsen, setOverlayMax: (n) => { OVERLAY_MAX = n; }, overlayInfo: () => ({ w: overlay.width, h: overlay.height, k: ovK }),
   dbg: { renameSighting, renderSightings, addCorrection, labelName, closeTop, toast, isSensitive, store, tracks: () => tracks, lockTrack: (i, name, key) => { const t = tracks[i]; t.locked = true; t.species = name; t.key = key; t.sure = true; t.other = false; t.conf = 1; return t.sightId; } }
 };
 bindSettings();

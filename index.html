@@ -484,10 +484,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <button type="button" class="switch" id="swCollect" role="switch" aria-checked="true" aria-label="Unsichere Treffer sammeln"></button>
     </div>
     <div class="row">
-      <div class="lbl">Kameraauflösung<small>Gilt ab dem nächsten Kamerastart</small></div>
+      <div class="lbl">Kameraauflösung<small>4K: schärfere Ausschnitte und Digitalzoom, mehr Akku</small></div>
       <select id="res" aria-label="Kameraauflösung">
-        <option value="720" selected>HD 720p</option>
+        <option value="720">HD 720p</option>
         <option value="1080">Full HD 1080p</option>
+        <option value="2160" selected>4K 2160p</option>
       </select>
     </div>
     <div class="actions">
@@ -495,7 +496,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <button type="button" id="btnReload">Modelle neu laden</button>
       <button type="button" id="btnStopCam">Kamera beenden</button>
     </div>
-    <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span> · <span id="gpsState">GPS aus</span></p>
+    <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span> · <span id="gpsState">GPS aus</span> · <span id="camRes">Kamera aus</span></p>
   </section>
 
   <section class="sheet" id="sheetClip" hidden aria-label="Aufnahme">

@@ -2,7 +2,7 @@
 
 Live-Tiererkennung mit Tracking für Safaris in Südafrika. Läuft komplett im Browser auf dem iPhone (Safari), ohne App Store: Kamera, Erkennung (COCO-SSD) und Artbestimmung (MobileNet-v2-Embeddings plus eigener Artenkopf mit rund 60 südafrikanischen Arten) laufen auf dem Gerät, nichts verlässt das Telefon.
 
-- Objektiv- und Zoomwahl (Hardware-Zoom, wenn Safari ihn freigibt, sonst digital)
+- Objektiv- und Zoomwahl (Hardware-Zoom, wenn Safari ihn freigibt, sonst digital), Kamera bis 4K (Standard)
 - Tracking mit stabilen IDs und geglätteten Rahmen
 - Aufnahme mit eingebranntem Overlay (MP4 in Safari), Teilen in Fotos oder in Dateien speichern
 - Sichtungsliste des Tages, teilbar
@@ -29,4 +29,4 @@ node train.js                  # Kopf trainieren, Bericht in report.json, Export
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
 
-Version: 1.3.0
+Version: 1.3.1
