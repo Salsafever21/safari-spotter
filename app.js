@@ -832,7 +832,7 @@ function tileGrid(reg, n) {
 async function analyzeStill(canvas) {
   const W = canvas.width, H = canvas.height, reg = { x: 0, y: 0, w: W, h: H };
   let dets = await detectRegionFrom(canvas, W, H, 0, 0, W, H, 416, false);
-  for (const t of tileGrid(reg, 3)) dets = dets.concat(await detectRegionFrom(canvas, W, H, t.x, t.y, t.w, t.h, 320, true));
+  for (const t of tileGrid(reg, 3)) { await sleep(0); dets = dets.concat(await detectRegionFrom(canvas, W, H, t.x, t.y, t.w, t.h, 320, true)); }
   dets = mergeDetections(dets);
   const minSide = Math.min(W, H) * 0.03;
   dets = dets.filter((d) => d.box[2] >= minSide && d.box[3] >= minSide).slice(0, 10);
@@ -1009,7 +1009,7 @@ async function detectLoop() {
     try {
       dets = await detectRegionFrom(video, vw, vh, reg.x, reg.y, reg.w, reg.h, 416, false);
       const n = settings.far === 'max' ? 3 : settings.far === 'off' ? 0 : 2;
-      if (n) for (const t of tileGrid(reg, n)) { if (!running) break; dets = dets.concat(await detectRegionFrom(video, vw, vh, t.x, t.y, t.w, t.h, 320, true)); }
+      if (n) for (const t of tileGrid(reg, n)) { if (!running) break; await sleep(0); dets = dets.concat(await detectRegionFrom(video, vw, vh, t.x, t.y, t.w, t.h, 320, true)); }
     } catch (e) { console.error(e); await sleep(250); continue; }
     dets = mergeDetections(dets);
     const minSide = Math.min(reg.w, reg.h) * 0.03, maxSide = Math.max(reg.w, reg.h) * 0.9;
@@ -1020,7 +1020,8 @@ async function detectLoop() {
     await idleHint(performance.now());
     const dt = performance.now() - t0;
     detFps = detFps * 0.8 + (1000 / Math.max(dt, 1)) * 0.2;
-    if (dt < 50) await sleep(50 - dt);
+    // Immer ein echter Zeitschlitz für Oberfläche und Zeichnen, auch wenn der Durchlauf lange dauerte
+    await sleep(Math.max(8, 50 - dt));
   }
 }
 
