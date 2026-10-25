@@ -38,12 +38,14 @@ trainIdx.forEach((i) => counts[idx[items[i].cls]]++);
 const mean = counts.reduce((a, b) => a + b, 0) / classes.length;
 const classWeight = Object.fromEntries(counts.map((c, i) => [i, Math.min(3, mean / Math.max(c, 1))]));
 
+const CFG = { hidden: +(process.env.HIDDEN || 256), dropIn: +(process.env.DROP_IN || 0.2), dropH: +(process.env.DROP_H || 0.35), l2: +(process.env.L2 || 1e-4), lr: +(process.env.LR || 1e-3) };
+console.log('Konfiguration:', JSON.stringify(CFG));
 const model = tf.sequential();
-model.add(tf.layers.dropout({ rate: 0.2, inputShape: [dim] }));
-model.add(tf.layers.dense({ units: 256, activation: 'relu', kernelRegularizer: tf.regularizers.l2({ l2: 1e-4 }) }));
-model.add(tf.layers.dropout({ rate: 0.35 }));
+model.add(tf.layers.dropout({ rate: CFG.dropIn, inputShape: [dim] }));
+model.add(tf.layers.dense({ units: CFG.hidden, activation: 'relu', kernelRegularizer: tf.regularizers.l2({ l2: CFG.l2 }) }));
+model.add(tf.layers.dropout({ rate: CFG.dropH }));
 model.add(tf.layers.dense({ units: classes.length, activation: 'softmax' }));
-model.compile({ optimizer: tf.train.adam(1e-3), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
 
 (async () => {
   console.log('Klassen:', classes.length, '| Training:', trainIdx.length, 'Vektoren | Validierung:', valIdx0.length, 'Fotos');
@@ -72,7 +74,10 @@ model.compile({ optimizer: tf.train.adam(1e-3), loss: 'categoricalCrossentropy',
     if (order[0] === t) { top1++; perClass[classes[t]].ok++; } else { const k = classes[t] + ' -> ' + classes[order[0]]; conf[k] = (conf[k] || 0) + 1; }
     if (order.slice(0, 3).includes(t)) top3++;
   });
-  console.log(`Top-1 ${(top1 / p.length * 100).toFixed(1)} %  Top-3 ${(top3 / p.length * 100).toFixed(1)} %`);
+  const groupOf = (i) => { const c = spec.classes[i]; return c.negative ? 'Anderes' : (c.group || c.key); };
+  let gOk = 0;
+  p.forEach((row, r) => { let bi = 0; row.forEach((v, i) => { if (v > row[bi]) bi = i; }); if (groupOf(bi) === groupOf(yv[r])) gOk++; });
+  console.log(`Top-1 ${(top1 / p.length * 100).toFixed(1)} %  Top-3 ${(top3 / p.length * 100).toFixed(1)} %  Gruppenebene ${(gOk / p.length * 100).toFixed(1)} %`);
   console.log('Schwächste Klassen:');
   Object.entries(perClass).map(([c, v]) => [c, v.n ? v.ok / v.n : 0, v.n]).sort((a, b) => a[1] - b[1]).slice(0, 12).forEach(([c, a, n]) => console.log('  ', c.padEnd(22), (a * 100).toFixed(0) + ' %', '(' + n + ')'));
   console.log('Häufigste Verwechslungen:');
@@ -84,7 +89,7 @@ model.compile({ optimizer: tf.train.adam(1e-3), loss: 'categoricalCrossentropy',
   await model.save('file://' + outDir);
   const meta = {
     version: '1.1.0', dim, trained: new Date().toISOString().slice(0, 10),
-    valTop1: Math.round(top1 / p.length * 1000) / 10, valPhotos: p.length,
+    valTop1: Math.round(top1 / p.length * 1000) / 10, valGroup: Math.round(gOk / p.length * 1000) / 10, valPhotos: p.length,
     classes: spec.classes.map((c) => ({ key: c.key, name: c.name, group: c.group || null, negative: !!c.negative, taxon: c.taxon }))
   };
   fs.writeFileSync(path.join(outDir, 'classes.json'), JSON.stringify(meta));

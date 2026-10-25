@@ -437,7 +437,7 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const MODEL_FILES = [
   'models/cocossd/model.json', 'models/cocossd/group1-shard1of5', 'models/cocossd/group1-shard2of5', 'models/cocossd/group1-shard3of5', 'models/cocossd/group1-shard4of5', 'models/cocossd/group1-shard5of5',
   'models/mobilenet/model.json', 'models/mobilenet/group1-shard1of4.bin', 'models/mobilenet/group1-shard2of4.bin', 'models/mobilenet/group1-shard3of4.bin', 'models/mobilenet/group1-shard4of4.bin',
-  HEAD_DIR + 'model.json', HEAD_DIR + 'group1-shard1of1.bin', HEAD_DIR + 'classes.json'
+  HEAD_DIR + 'model.json', HEAD_DIR + 'weights.bin', HEAD_DIR + 'classes.json'
 ];
 async function prefetchModels(onProgress) {
   let done = 0;
@@ -688,6 +688,8 @@ function decideSpecies(probs) {
   if (c1.group && c2.group === c1.group && p1 - p2 < 0.3) {
     return { name: c1.group, conf: p1 + p2, sure: p1 + p2 >= 0.55, other: false };
   }
+  // Zu unsicher für einen Artnamen: nur der grobe Detektor-Hinweis bleibt
+  if (p1 < 0.35) return { name: null, conf: p1, sure: false, other: false };
   return { name: c1.name, conf: p1, sure: p1 >= 0.55, other: false };
 }
 
@@ -705,7 +707,7 @@ async function idleHint(now) {
   if (!r) return;
   const d = decideSpecies(r.probs);
   hintRuns.push(d); if (hintRuns.length > 4) hintRuns.shift();
-  const same = hintRuns.filter((x) => x.name === d.name && !x.other && x.conf >= 0.6).length;
+  const same = d.name ? hintRuns.filter((x) => x.name === d.name && !x.other && x.conf >= 0.6).length : 0;
   if (same >= 2 && !d.other) {
     hint = { name: d.name, conf: d.conf, until: now + 1800 };
     if (same >= 4 && d.conf >= 0.7) logSighting(d.name, true);
@@ -816,7 +818,7 @@ function drawOverlay(ctx, map, px) {
     ctx.moveTo(X + c, Y + H); ctx.lineTo(X, Y + H); ctx.lineTo(X, Y + H - c);
     ctx.stroke();
     if (!settings.labels) continue;
-    const name = t.species || COCO_FALLBACK[t.cls] || 'Tier';
+    const name = t.species ? (t.sure || t.other || t.species.endsWith('?') ? t.species : t.species + '?') : (COCO_FALLBACK[t.cls] || 'Tier');
     const sub = t.other ? 'kein Safari-Tier' : t.species ? Math.round(Math.min(t.conf, 0.99) * 100) + ' %' : 'unbestimmt';
     const fs = 14 * px;
     ctx.font = '600 ' + fs + 'px ' + '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
@@ -1047,6 +1049,7 @@ $('#btnStart').addEventListener('click', startAll);
 window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); });
 
 /* ---------- Hochfahren ---------- */
+window.__spotter = { state: () => ({ version: VERSION, head: !!head, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits })), hint, hintRuns: hintRuns.slice(), detFps }) };
 bindSettings();
 renderSightings();
 if ('serviceWorker' in navigator) {
