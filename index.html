@@ -12,6 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png" type="image/png">
+<link rel="stylesheet" href="vendor/leaflet.css">
 <title>Safari Spotter</title>
 <style>
 /* Layout: full-bleed camera stage, translucent chrome pinned to the safe-area edges, sheets slide up from the bottom. Single deliberate dark look (camera UI in bright sun). */
@@ -19,6 +20,7 @@
   --bg: #0d0f0b;
   --panel: rgba(16, 19, 13, 0.78);
   --panel-solid: #15190f;
+  --panel-2: #1d2216;
   --fg: #f4f0e6;
   --muted: #b5b0a2;
   --line: rgba(244, 240, 230, 0.14);
@@ -72,6 +74,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .pill.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(155, 217, 111, 0.25); }
 .pill .fps { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.pill .km { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--accent); }
 .lens {
   appearance: none; -webkit-appearance: none;
   background: var(--panel); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
@@ -113,7 +116,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   border: 1px solid var(--line); font-size: 14px; font-weight: 600;
 }
 .sidebtn.left { justify-self: start; }
-.sidebtn.right { justify-self: end; width: 46px; padding: 0; }
+.rightgroup { justify-self: end; display: flex; gap: 10px; }
+.sidebtn.round { width: 46px; padding: 0; }
 .badge {
   min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
   background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700;
@@ -154,8 +158,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .card { background: var(--panel-solid); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .card h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
 .species { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
-.species li { font-size: 13px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
-.species li.weak { color: var(--muted); border-style: dashed; }
+.species li button, .species li { font-size: 13px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
+.species li:has(button) { padding: 0; border: 0; }
 .progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 10px; }
 .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
 .prim {
@@ -164,7 +168,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 16px;
 }
 .prim:disabled { opacity: 0.5; }
-.ghost { color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.sec { background: var(--line); color: var(--fg); }
 .err { border-color: rgba(229, 72, 77, 0.5); color: #ffd9da; }
 .small { font-size: 13px; color: var(--muted); margin: 0; }
 .small b { color: var(--fg); font-weight: 600; }
@@ -173,7 +177,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .scrim { position: absolute; inset: 0; z-index: 30; background: rgba(0, 0, 0, 0.45); }
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 31;
-  max-height: 82%; overflow: auto; -webkit-overflow-scrolling: touch;
+  max-height: 86%; overflow: auto; -webkit-overflow-scrolling: touch;
   background: var(--panel-solid); border-top-left-radius: 20px; border-top-right-radius: 20px;
   border-top: 1px solid var(--line);
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
@@ -181,16 +185,24 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   padding-left: max(18px, env(safe-area-inset-left, 0px));
   padding-right: max(18px, env(safe-area-inset-right, 0px));
 }
+.sheet.top { z-index: 33; }
 .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 12px; }
 .sheet header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .sheet h2 { margin: 0; font-size: 18px; }
-.closebtn { width: 36px; height: 36px; border-radius: 50%; background: var(--line); display: grid; place-items: center; font-size: 18px; }
+.sheet h3 { margin: 16px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.closebtn { width: 36px; height: 36px; border-radius: 50%; background: var(--line); display: grid; place-items: center; font-size: 18px; flex: none; }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; padding: 8px 14px; border-radius: 999px; background: var(--line); font-size: 14px; font-weight: 600; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
 .row:first-of-type { border-top: 0; }
 .row .lbl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row .lbl small { color: var(--muted); font-size: 12px; }
 .row select, .row input[type=range] { max-width: 50%; }
-.row select { appearance: none; -webkit-appearance: none; background: var(--line); border: 0; border-radius: 10px; padding: 8px 12px; }
+.row select, .picker select, .picker input {
+  appearance: none; -webkit-appearance: none; background: var(--line); border: 0; border-radius: 10px; padding: 8px 12px; color: var(--fg);
+}
 .row input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--line); width: 46%; }
 .row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); }
 .switch { position: relative; width: 50px; height: 30px; border-radius: 15px; background: var(--line); transition: background .15s; flex: none; }
@@ -198,14 +210,32 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .switch[aria-checked="true"] { background: var(--accent); }
 .switch[aria-checked="true"]::after { transform: translateX(20px); }
 .list { margin: 0; padding: 0; list-style: none; }
-.list li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); }
+.list li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
 .list li:first-child { border-top: 0; }
-.list .n { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.list .thumb { width: 44px; height: 44px; border-radius: 8px; background: var(--panel-2); object-fit: cover; display: block; }
+.list .thumb.empty { display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+.list .name { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.list .name button { text-align: left; font-weight: 600; color: var(--fg); }
+.list .name small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list .t { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.stepper { display: inline-flex; align-items: center; gap: 2px; background: var(--line); border-radius: 999px; }
+.stepper button { width: 32px; height: 32px; border-radius: 50%; font-size: 18px; display: grid; place-items: center; }
+.stepper span { min-width: 26px; text-align: center; font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.counts { margin: 0; padding: 0; list-style: none; }
+.counts li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.counts li:first-child { border-top: 0; }
+.counts .n { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tile { background: var(--panel-2); border-radius: 12px; padding: 12px; }
+.tile b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.tile small { color: var(--muted); font-size: 12px; }
+.big5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.big5 div { text-align: center; padding: 10px 4px; border-radius: 10px; border: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.big5 div.done { border: 1px solid var(--ok); color: var(--fg); background: rgba(155, 217, 111, 0.1); }
 .empty { color: var(--muted); padding: 18px 0; text-align: center; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.actions button { flex: 1 1 140px; min-height: 46px; border-radius: 12px; background: var(--line); font-weight: 600; }
-.actions button.main { background: var(--accent); color: var(--accent-ink); }
+.actions button, .actions label.btn { flex: 1 1 140px; min-height: 46px; border-radius: 12px; background: var(--line); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.actions button.main, .actions label.btn.main { background: var(--accent); color: var(--accent-ink); }
 .actions button.danger { color: #ffb3b5; }
 .clip { width: 100%; max-height: 42vh; border-radius: 12px; background: #000; display: block; }
 .version { color: var(--muted); font-size: 12px; text-align: center; margin-top: 16px; font-family: var(--mono); }
@@ -214,6 +244,24 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   z-index: 40; background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
   max-width: calc(100% - 32px); text-align: center;
 }
+#map { height: 42vh; min-height: 220px; border-radius: 12px; background: #23271c; overflow: hidden; }
+.leaflet-container { font: 12px var(--font); }
+.cropbox { display: grid; grid-template-columns: 112px 1fr; gap: 14px; align-items: start; }
+.cropbox img { width: 112px; height: 112px; border-radius: 12px; object-fit: cover; background: var(--panel-2); }
+.picker { display: flex; flex-direction: column; gap: 8px; }
+.picker select { width: 100%; }
+.review li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.review li:first-child { border-top: 0; }
+.review img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; }
+.review .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.review .btns button { padding: 6px 10px; border-radius: 999px; background: var(--line); font-size: 13px; font-weight: 600; }
+.review .btns button.ok { background: rgba(155, 217, 111, 0.2); color: var(--ok); }
+.photo { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
+.photo canvas { width: 100%; height: auto; display: block; max-height: 48vh; object-fit: contain; }
+.profile dl { margin: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+.profile dt { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.profile dd { margin: 2px 0 0; }
+.profile .latin { color: var(--muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -227,7 +275,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   </div>
 
   <header class="topbar">
-    <div class="pill" id="status"><span class="dot"></span><span id="statusText">Bereit</span><span class="fps" id="fps"></span></div>
+    <div class="pill" id="status"><span class="dot"></span><span id="statusText">Bereit</span><span class="km" id="kmPill" hidden></span><span class="fps" id="fps"></span></div>
     <select class="lens" id="lens" aria-label="Objektiv" hidden></select>
   </header>
 
@@ -241,9 +289,14 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   <footer class="bottombar">
     <button class="sidebtn left" id="btnSightings" type="button" aria-label="Sichtungen anzeigen">Sichtungen <span class="badge" id="sightCount">0</span></button>
     <button class="recbtn" id="btnRecord" type="button" aria-label="Aufnahme starten" disabled><span></span></button>
-    <button class="sidebtn right" id="btnSettings" type="button" aria-label="Einstellungen">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-    </button>
+    <div class="rightgroup">
+      <button class="sidebtn round" id="btnPhoto" type="button" aria-label="Foto aufnehmen und analysieren" disabled>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      </button>
+      <button class="sidebtn round" id="btnSettings" type="button" aria-label="Einstellungen">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
   </footer>
 
   <!-- Start screen -->
@@ -265,20 +318,23 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
         <div class="progress" aria-hidden="true"><i id="loadBar"></i></div>
       </div>
 
-      <div class="card">
-        <h2 id="speciesTitle">Erkennt zuverlässig</h2>
-        <ul class="species" id="speciesList">
-          <li>Elefant</li><li>Löwe</li><li>Leopard</li><li>Gepard</li><li>Zebra</li><li>Giraffe</li><li>Flusspferd</li><li>Kaffernbüffel</li><li>Impala</li><li>Springbock</li><li>Kuhantilope</li><li>Warzenschwein</li><li>Hyäne</li><li>Wildhund</li><li>Pavian</li><li>Meerkatze</li><li>Strauss</li><li>Erdmännchen</li><li>Krokodil</li><li>Geier</li><li>Nashornvogel</li>
-        </ul>
-        <p class="small" style="margin-top:12px" id="speciesNote">Nur geschätzt, mit Fragezeichen: <b>Nashorn</b>, <b>Gnu</b>, <b>Kudu</b>. Diese Arten kennen die Modelle nicht, die App leitet sie aus Form und Kontext ab.</p>
-      </div>
-
       <div class="card err" id="gateErr" hidden></div>
 
       <button class="prim" id="btnStart" type="button" disabled>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg>
         <span id="btnStartText">Modelle laden …</span>
       </button>
+      <label class="prim sec" for="fileGate" id="lblFileGate" style="cursor:pointer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg>
+        Bilder aus der Mediathek analysieren
+        <input type="file" id="fileGate" accept="image/*" multiple hidden>
+      </label>
+
+      <div class="card">
+        <h2 id="speciesTitle">Erkennt zuverlässig</h2>
+        <ul class="species" id="speciesList"></ul>
+        <p class="small" style="margin-top:12px" id="speciesNote">Die Artenliste erscheint, sobald die Modelle geladen sind. Tipp auf eine Art zeigt den Steckbrief.</p>
+      </div>
 
       <p class="small"><b>Tipp:</b> In Safari über „Teilen“ zum Home-Bildschirm hinzufügen, dann läuft die App im Vollbild. Für weit entfernte Tiere das Teleobjektiv oben rechts wählen.</p>
     </div>
@@ -289,12 +345,106 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
   <section class="sheet" id="sheetSightings" hidden aria-label="Sichtungen">
     <div class="grip"></div>
-    <header><h2>Sichtungen heute</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
-    <ul class="list" id="sightList"></ul>
-    <div class="empty" id="sightEmpty">Noch keine Sichtungen. Sobald ein Tier sicher erkannt wird, landet es hier.</div>
+    <header><h2 id="sightTitle">Sichtungen heute</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="list" aria-selected="true">Liste</button>
+      <button type="button" role="tab" data-tab="stats" aria-selected="false">Zählung</button>
+      <button type="button" role="tab" data-tab="trip" aria-selected="false">Fahrt</button>
+      <button type="button" role="tab" data-tab="review" aria-selected="false">Prüfen <span class="badge" id="reviewCount" hidden>0</span></button>
+    </div>
+
+    <div id="tabList">
+      <ul class="list" id="sightList"></ul>
+      <div class="empty" id="sightEmpty">Noch keine Sichtungen. Sobald ein Tier sicher erkannt wird, landet es hier. Tipp auf einen Rahmen im Kamerabild korrigiert die Art.</div>
+      <div class="actions">
+        <button type="button" class="main" id="btnShareSight">Liste teilen</button>
+        <button type="button" id="btnAddManual">Manuell eintragen</button>
+        <button type="button" class="danger" id="btnClearSight">Liste leeren</button>
+      </div>
+    </div>
+
+    <div id="tabStats" hidden>
+      <div class="tiles">
+        <div class="tile"><b id="stTotal">0</b><small>Tiere</small></div>
+        <div class="tile"><b id="stSpecies">0</b><small>Arten</small></div>
+        <div class="tile"><b id="stKm">0,0</b><small>km gefahren</small></div>
+      </div>
+      <h3>Big Five</h3>
+      <div class="big5" id="big5"></div>
+      <h3>Pro Art</h3>
+      <ul class="counts" id="countList"></ul>
+      <div class="actions">
+        <button type="button" class="main" id="btnShareStats">Als Bild teilen</button>
+        <button type="button" id="btnExportCsv">CSV exportieren</button>
+      </div>
+    </div>
+
+    <div id="tabTrip" hidden>
+      <div class="tiles">
+        <div class="tile"><b id="trKm">0,0</b><small>km</small></div>
+        <div class="tile"><b id="trTime">0:00</b><small>Stunden</small></div>
+        <div class="tile"><b id="trSpeed">0</b><small>km/h Schnitt</small></div>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button type="button" class="main" id="btnTrip">Fahrt starten</button>
+        <button type="button" id="btnExportGpx">GPX exportieren</button>
+      </div>
+      <p class="small" id="tripNote" style="margin-top:10px">Die Aufzeichnung läuft, solange die App im Vordergrund ist. Nashorn-Sichtungen werden nur auf 10 km genau gespeichert, auch im Fahrtprotokoll.</p>
+      <h3>Karte</h3>
+      <div id="map"></div>
+      <h3>Frühere Fahrten</h3>
+      <ul class="counts" id="tripList"></ul>
+    </div>
+
+    <div id="tabReview" hidden>
+      <p class="small">Unsichere Erkennungen landen hier. Bestätigen oder korrigieren, dann exportieren: Daraus lernt das Modell deine Safari.</p>
+      <ul class="list review" id="reviewList"></ul>
+      <div class="empty" id="reviewEmpty">Nichts zu prüfen.</div>
+      <div class="actions">
+        <button type="button" class="main" id="btnExportCorr">Korrekturen exportieren</button>
+        <button type="button" class="danger" id="btnClearCorr">Geprüfte löschen</button>
+      </div>
+      <p class="small" id="corrStats" style="margin-top:10px"></p>
+    </div>
+  </section>
+
+  <section class="sheet top" id="sheetCorrect" hidden aria-label="Art korrigieren">
+    <div class="grip"></div>
+    <header><h2>Art korrigieren</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="cropbox">
+      <img id="corrImg" alt="Ausschnitt">
+      <div class="picker">
+        <p class="small">Erkannt: <b id="corrPred">…</b></p>
+        <input type="search" id="corrSearch" placeholder="Art suchen …" autocomplete="off">
+        <select id="corrSelect" size="6" aria-label="Richtige Art"></select>
+      </div>
+    </div>
     <div class="actions">
-      <button type="button" class="main" id="btnShareSight">Liste teilen</button>
-      <button type="button" class="danger" id="btnClearSight">Liste leeren</button>
+      <button type="button" class="main" id="btnCorrOk">Erkennung ist richtig</button>
+      <button type="button" id="btnCorrSave">Korrektur speichern</button>
+      <button type="button" id="btnCorrInfo">Steckbrief</button>
+    </div>
+  </section>
+
+  <section class="sheet top" id="sheetProfile" hidden aria-label="Steckbrief">
+    <div class="grip"></div>
+    <header><h2 id="profName">Art</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="profile">
+      <p class="latin" id="profLatin"></p>
+      <dl id="profBody"></dl>
+    </div>
+  </section>
+
+  <section class="sheet top" id="sheetPhoto" hidden aria-label="Bildanalyse">
+    <div class="grip"></div>
+    <header><h2 id="photoTitle">Bildanalyse</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
+    <div class="photo"><canvas id="photoCanvas"></canvas></div>
+    <p class="small" id="photoInfo" style="margin-top:10px"></p>
+    <ul class="list" id="photoList"></ul>
+    <div class="actions">
+      <button type="button" class="main" id="btnPhotoSave">Als Sichtung speichern</button>
+      <button type="button" id="btnPhotoShare">Bild mit Rahmen teilen</button>
+      <button type="button" id="btnPhotoNext" hidden>Nächstes Bild</button>
     </div>
   </section>
 
@@ -302,8 +452,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
     <div class="grip"></div>
     <header><h2>Einstellungen</h2><button class="closebtn" type="button" data-close aria-label="Schliessen">×</button></header>
     <div class="row">
-      <div class="lbl">Empfindlichkeit<small id="thrVal">Schwelle 45 %</small></div>
-      <input type="range" id="thr" min="0.25" max="0.75" step="0.05" value="0.45" aria-label="Empfindlichkeit">
+      <div class="lbl">Empfindlichkeit<small id="thrVal">Schwelle 40 %</small></div>
+      <input type="range" id="thr" min="0.25" max="0.75" step="0.05" value="0.4" aria-label="Empfindlichkeit">
     </div>
     <div class="row">
       <div class="lbl">Namen einblenden<small>Art und Sicherheit am Rahmen</small></div>
@@ -322,6 +472,18 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       </select>
     </div>
     <div class="row">
+      <div class="lbl">Region als Vorwissen<small id="regionNote">Dämpft Arten, die hier nicht vorkommen</small></div>
+      <select id="region" aria-label="Region"></select>
+    </div>
+    <div class="row">
+      <div class="lbl">Standort erfassen<small>Für Sichtungen und Fahrtaufzeichnung</small></div>
+      <button type="button" class="switch" id="swGps" role="switch" aria-checked="true" aria-label="Standort erfassen"></button>
+    </div>
+    <div class="row">
+      <div class="lbl">Unsichere Treffer sammeln<small>Zum Prüfen und Nachtrainieren</small></div>
+      <button type="button" class="switch" id="swCollect" role="switch" aria-checked="true" aria-label="Unsichere Treffer sammeln"></button>
+    </div>
+    <div class="row">
       <div class="lbl">Kameraauflösung<small>Gilt ab dem nächsten Kamerastart</small></div>
       <select id="res" aria-label="Kameraauflösung">
         <option value="720" selected>HD 720p</option>
@@ -329,10 +491,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       </select>
     </div>
     <div class="actions">
+      <label class="btn" for="fileSettings">Bilder analysieren<input type="file" id="fileSettings" accept="image/*" multiple hidden></label>
       <button type="button" id="btnReload">Modelle neu laden</button>
       <button type="button" id="btnStopCam">Kamera beenden</button>
     </div>
-    <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span></p>
+    <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span> · <span id="gpsState">GPS aus</span></p>
   </section>
 
   <section class="sheet" id="sheetClip" hidden aria-label="Aufnahme">
@@ -353,794 +516,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 <script src="vendor/tf.min.js"></script>
 <script src="vendor/coco-ssd.min.js"></script>
 <script src="vendor/mobilenet.min.js"></script>
-<script>
-(() => {
-'use strict';
-const VERSION = '1.2.1';
-const HEAD_DIR = 'models/head/1.2.1/';
-const $ = (s) => document.querySelector(s);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/* ---------- Artenwissen ---------- */
-// COCO-Klassen, die als Tier gelten (alles andere wird ignoriert)
-const ANIMAL_COCO = new Set(['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']);
-// COCO-Klassen, die direkt eine Art bedeuten
-const COCO_DIRECT = { elephant: 'Elefant', zebra: 'Zebra', giraffe: 'Giraffe' };
-// Rückfall-Bezeichnung, wenn der Klassifikator nichts Brauchbares liefert
-const COCO_FALLBACK = { bird: 'Vogel', cat: 'Raubkatze?', dog: 'Hundeartiges?', horse: 'Antilope / Zebra?', sheep: 'Antilope?', cow: 'Antilope / Büffel?', elephant: 'Elefant', bear: 'Grosses Tier?', zebra: 'Zebra', giraffe: 'Giraffe' };
-// ImageNet-Klasse (erster Name, klein) -> deutsche Art. Ein "?" markiert eine unsichere Zuordnung.
-const SPECIES = {
-  'african elephant': 'Elefant', 'indian elephant': 'Elefant', 'tusker': 'Elefant',
-  'zebra': 'Zebra', 'arabian camel': 'Giraffe?',
-  'lion': 'Löwe', 'leopard': 'Leopard', 'cheetah': 'Gepard', 'jaguar': 'Leopard?', 'snow leopard': 'Leopard?', 'tiger': 'Raubkatze?',
-  'cougar': 'Karakal?', 'lynx': 'Karakal?', 'egyptian cat': 'Wildkatze?', 'tabby': 'Wildkatze?', 'tiger cat': 'Serval?',
-  'hippopotamus': 'Flusspferd',
-  'water buffalo': 'Kaffernbüffel', 'ox': 'Büffel / Gnu?', 'bison': 'Gnu / Büffel?',
-  'impala': 'Impala', 'gazelle': 'Springbock', 'hartebeest': 'Kuhantilope', 'ibex': 'Kudu?', 'bighorn': 'Antilope?', 'ram': 'Antilope?', 'sorrel': 'Antilope?', 'llama': 'Antilope?',
-  'warthog': 'Warzenschwein', 'wild boar': 'Buschschwein?', 'hog': 'Warzenschwein?',
-  'ostrich': 'Strauss', 'baboon': 'Pavian', 'guenon': 'Meerkatze', 'patas': 'Meerkatze?', 'macaque': 'Affe?', 'langur': 'Affe?', 'colobus': 'Affe?', 'chimpanzee': 'Affe?', 'gorilla': 'Affe?',
-  'hyena': 'Hyäne', 'african hunting dog': 'Wildhund',
-  'coyote': 'Schakal?', 'dingo': 'Schakal?', 'dhole': 'Schakal?', 'red fox': 'Schakal?', 'kit fox': 'Löffelhund?', 'grey fox': 'Schakal?', 'red wolf': 'Schakal?', 'timber wolf': 'Hyäne / Wildhund?',
-  'meerkat': 'Erdmännchen', 'mongoose': 'Manguste', 'badger': 'Honigdachs', 'porcupine': 'Stachelschwein', 'marmot': 'Klippschliefer?', 'guinea pig': 'Klippschliefer?', 'wombat': 'Klippschliefer?', 'hare': 'Hase', 'wood rabbit': 'Hase', 'armadillo': 'Schuppentier?', 'triceratops': 'Nashorn?',
-  'african crocodile': 'Nilkrokodil', 'american alligator': 'Krokodil?', 'komodo dragon': 'Waran', 'agama': 'Agame', 'african chameleon': 'Chamäleon', 'common iguana': 'Echse?', 'rock python': 'Felsenpython', 'green mamba': 'Mamba', 'indian cobra': 'Kobra?', 'boa constrictor': 'Python?',
-  'box turtle': 'Schildkröte', 'terrapin': 'Schildkröte', 'mud turtle': 'Schildkröte', 'leatherback turtle': 'Schildkröte',
-  'vulture': 'Geier', 'kite': 'Milan', 'bald eagle': 'Adler?', 'great grey owl': 'Eule', 'hornbill': 'Nashornvogel', 'bustard': 'Riesentrappe', 'flamingo': 'Flamingo', 'crane': 'Kranich', 'white stork': 'Storch', 'black stork': 'Storch', 'spoonbill': 'Löffler', 'pelican': 'Pelikan', 'goose': 'Nilgans', 'bee eater': 'Bienenfresser', 'african grey': 'Papagei', 'coucal': 'Spornkuckuck', 'bulbul': 'Bülbül', 'partridge': 'Frankolin?', 'prairie chicken': 'Perlhuhn?', 'black grouse': 'Perlhuhn?', 'peacock': 'Perlhuhn?', 'quail': 'Frankolin?', 'little blue heron': 'Reiher', 'american egret': 'Reiher', 'bittern': 'Reiher', 'drake': 'Ente', 'red-breasted merganser': 'Ente', 'black swan': 'Schwan', 'magpie': 'Elster?', 'jay': 'Vogel?'
-};
-const COLORS = ['#f0a93a', '#5ec8f2', '#9be36a', '#f27ab0', '#c9a3ff', '#55e0c8', '#ffd166', '#ff9f6e'];
-
-function speciesFor(className) {
-  const key = String(className).split(',')[0].trim().toLowerCase();
-  return SPECIES[key] || null;
-}
-
-/* ---------- Zustand ---------- */
-const store = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* privat/voll: egal */ } }
-};
-const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '720' }, store.get('ss.settings', {}));
-let sightings = store.get('ss.sightings', []);
-if (!Array.isArray(sightings)) sightings = [];
-
-const video = $('#cam'), overlay = $('#overlay'), stage = $('#stage'), viewportEl = $('#viewport');
-const octx = overlay.getContext('2d');
-const detCanvas = document.createElement('canvas'); const dctx = detCanvas.getContext('2d');
-const clsCanvas = document.createElement('canvas'); clsCanvas.width = clsCanvas.height = 224; const cctx = clsCanvas.getContext('2d');
-const recCanvas = $('#recCanvas'); const rctx = recCanvas.getContext('2d');
-
-let detector = null, classifier = null, head = null, headMeta = null, stream = null, running = false, currentDeviceId = null;
-let hint = null, hintRuns = [], lastHintAt = 0, hintFlip = false;
-let zoom = 1, hwZoom = null;
-let tracks = [], nextId = 1, detFps = 0;
-let recorder = null, chunks = [], recStart = 0, recTimerId = 0, micStream = null, recMime = '', isRecording = false, recMap = null, lastClip = null;
-let wakeLock = null;
-
-/* ---------- UI-Helfer ---------- */
-function setStatus(text, live) {
-  $('#statusText').textContent = text;
-  $('#status').classList.toggle('live', !!live);
-}
-let toastId = 0;
-function toast(msg, ms = 2200) {
-  const t = $('#toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastId); toastId = setTimeout(() => { t.hidden = true; }, ms);
-}
-function openSheet(id) { $('#scrim').hidden = false; $(id).hidden = false; }
-function closeSheets() { $('#scrim').hidden = true; document.querySelectorAll('.sheet').forEach((s) => { s.hidden = true; }); }
-$('#scrim').addEventListener('click', closeSheets);
-document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeSheets));
-const fmtTime = (ts) => new Date(ts).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
-const fmtZoom = (z) => z.toFixed(1).replace('.', ',') + '×';
-const pad2 = (n) => String(n).padStart(2, '0');
-
-/* ---------- Modelle ---------- */
-const MODEL_FILES = [
-  'models/cocossd/model.json', 'models/cocossd/group1-shard1of5', 'models/cocossd/group1-shard2of5', 'models/cocossd/group1-shard3of5', 'models/cocossd/group1-shard4of5', 'models/cocossd/group1-shard5of5',
-  'models/mobilenet/model.json', 'models/mobilenet/group1-shard1of4.bin', 'models/mobilenet/group1-shard2of4.bin', 'models/mobilenet/group1-shard3of4.bin', 'models/mobilenet/group1-shard4of4.bin',
-  HEAD_DIR + 'model.json', HEAD_DIR + 'weights.bin', HEAD_DIR + 'classes.json'
-];
-async function prefetchModels(onProgress) {
-  let done = 0;
-  await Promise.all(MODEL_FILES.map(async (u) => {
-    const r = await fetch(u);
-    if (!r.ok) throw new Error('Modelldatei fehlt: ' + u);
-    await r.arrayBuffer();
-    done++; onProgress(done / MODEL_FILES.length);
-  }));
-}
-async function loadModels() {
-  const bar = $('#loadBar'), txt = $('#loadText');
-  await tf.ready();
-  try { await tf.setBackend('webgl'); await tf.ready(); } catch (e) { try { await tf.setBackend('cpu'); } catch (e2) { /* bleibt */ } }
-  $('#backend').textContent = tf.getBackend();
-  try {
-    await prefetchModels((p) => { bar.style.width = Math.round(p * 70) + '%'; txt.textContent = 'Lade Modelle … ' + Math.round(p * 100) + ' %'; });
-  } catch (e) {
-    // Ohne Vorabladen weiter: die Bibliotheken holen die Dateien selbst.
-    console.warn(e);
-  }
-  txt.textContent = 'Modelle werden vorbereitet …'; bar.style.width = '80%';
-  const [d, c, h, meta] = await Promise.all([
-    cocoSsd.load({ base: 'lite_mobilenet_v2', modelUrl: 'models/cocossd/model.json' }),
-    mobilenet.load({ version: 2, alpha: 1.0, modelUrl: 'models/mobilenet/model.json', inputRange: [0, 1] }),
-    tf.loadLayersModel(HEAD_DIR + 'model.json').catch((e) => { console.warn('Artenkopf fehlt, nutze ImageNet-Zuordnung', e); return null; }),
-    fetch(HEAD_DIR + 'classes.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)
-  ]);
-  detector = d; classifier = c;
-  if (h && meta && meta.classes && meta.classes.length === h.outputs[0].shape[1]) {
-    head = h; headMeta = meta;
-    // Aufwärmen, damit der erste echte Durchlauf nicht ruckelt
-    tf.tidy(() => head.predict(tf.zeros([1, meta.dim || 1280])));
-  }
-  renderSpeciesList();
-  bar.style.width = '100%';
-  txt.textContent = 'Bereit. Erkennung läuft auf ' + (tf.getBackend() === 'webgl' ? 'der GPU' : 'der CPU (langsamer)') + ', nichts verlässt das Gerät.';
-}
-function renderSpeciesList() {
-  const ul = $('#speciesList'), h2 = $('#speciesTitle'), note = $('#speciesNote');
-  if (!headMeta) return;
-  const shown = headMeta.classes.filter((c) => !c.negative);
-  ul.innerHTML = '';
-  shown.forEach((c) => { const li = document.createElement('li'); li.textContent = c.name; ul.appendChild(li); });
-  h2.textContent = 'Erkennt ' + shown.length + ' Arten';
-  note.innerHTML = 'Eigenes Modell, trainiert mit Fotos aus iNaturalist (Stand ' + (headMeta.trained || '') + '). Im Test ' + headMeta.valTop1 + ' % richtige Art auf ' + headMeta.valPhotos + ' ungesehenen Fotos. Bei knapper Entscheidung zeigt die App den Sammelnamen (z.&nbsp;B. <b>Nashorn</b>, <b>Löwe</b>).';
-}
-
-/* ---------- Kamera ---------- */
-function stopStream() {
-  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-}
-async function startCamera(deviceId) {
-  stopStream();
-  const w = settings.res === '1080' ? 1920 : 1280, h = settings.res === '1080' ? 1080 : 720;
-  const vc = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } };
-  Object.assign(vc, { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } });
-  stream = await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
-  video.srcObject = stream;
-  try { await video.play(); } catch (e) { /* autoplay: Nutzer hat schon geklickt */ }
-  const track = stream.getVideoTracks()[0];
-  const s = track.getSettings ? track.getSettings() : {};
-  currentDeviceId = s.deviceId || deviceId || null;
-  setupZoom(track);
-  await listLenses();
-}
-function lensName(label, i) {
-  const l = (label || '').toLowerCase();
-  if (!label) return 'Kamera ' + (i + 1);
-  if (l.includes('ultra')) return 'Ultraweitwinkel 0,5×';
-  if (l.includes('tele')) return 'Teleobjektiv';
-  if (l.includes('front')) return 'Frontkamera';
-  if (l.includes('dual') || l.includes('triple')) return 'Rückkamera (Auto)';
-  if (l.includes('back') || l.includes('rear') || l.includes('rück')) return 'Rückkamera 1×';
-  return label;
-}
-async function listLenses() {
-  const sel = $('#lens');
-  try {
-    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-    if (devs.length < 2) { sel.hidden = true; return; }
-    sel.innerHTML = '';
-    devs.forEach((d, i) => {
-      const o = document.createElement('option'); o.value = d.deviceId; o.textContent = lensName(d.label, i);
-      if (d.deviceId === currentDeviceId) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.hidden = false;
-  } catch (e) { sel.hidden = true; }
-}
-$('#lens').addEventListener('change', async (e) => {
-  try { await startCamera(e.target.value); toast(e.target.selectedOptions[0].textContent); }
-  catch (err) { toast('Objektivwechsel fehlgeschlagen'); console.error(err); }
-});
-
-/* Zoom: Hardware-Zoom, wenn Safari ihn freigibt, sonst digital */
-function setupZoom(track) {
-  hwZoom = null; zoom = 1;
-  const slider = $('#zoom');
-  try {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps && caps.zoom && caps.zoom.max > caps.zoom.min) {
-      hwZoom = { track, min: caps.zoom.min, max: Math.min(caps.zoom.max, 15), step: caps.zoom.step || 0.1 };
-    }
-  } catch (e) { hwZoom = null; }
-  if (hwZoom) {
-    slider.min = hwZoom.min; slider.max = hwZoom.max; slider.step = hwZoom.step;
-    const s = track.getSettings ? track.getSettings() : {};
-    slider.value = s.zoom || hwZoom.min;
-  } else {
-    slider.min = 1; slider.max = 4; slider.step = 0.1; slider.value = 1;
-  }
-  stage.style.transform = '';
-  $('#zoomVal').textContent = fmtZoom(parseFloat(slider.value));
-  $('#zoomWrap').hidden = false;
-}
-let zoomTimer = 0;
-$('#zoom').addEventListener('input', (e) => {
-  const v = parseFloat(e.target.value);
-  $('#zoomVal').textContent = fmtZoom(v);
-  if (hwZoom) {
-    clearTimeout(zoomTimer);
-    zoomTimer = setTimeout(() => { hwZoom.track.applyConstraints({ advanced: [{ zoom: v }] }).catch(() => {}); }, 40);
-  } else {
-    zoom = v; stage.style.transform = v > 1 ? 'scale(' + v + ')' : '';
-  }
-});
-
-/* Sichtbarer Ausschnitt des Videos (object-fit: cover + Digitalzoom) in Videokoordinaten */
-function visibleRegion() {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  const W = viewportEl.clientWidth || 1, H = viewportEl.clientHeight || 1;
-  const s = Math.max(W / vw, H / vh);
-  const z = hwZoom ? 1 : zoom;
-  let w = Math.min(vw, W / (s * z)), h = Math.min(vh, H / (s * z));
-  return { x: (vw - w) / 2, y: (vh - h) / 2, w, h, cssScale: s * z };
-}
-function syncCanvases() {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !vh) return false;
-  if (overlay.width !== vw || overlay.height !== vh) { overlay.width = vw; overlay.height = vh; }
-  return true;
-}
-
-/* ---------- Tracking ---------- */
-function iou(a, b) {
-  const ax2 = a[0] + a[2], ay2 = a[1] + a[3], bx2 = b[0] + b[2], by2 = b[1] + b[3];
-  const iw = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
-  const ih = Math.max(0, Math.min(ay2, by2) - Math.max(a[1], b[1]));
-  const inter = iw * ih, u = a[2] * a[3] + b[2] * b[3] - inter;
-  return u > 0 ? inter / u : 0;
-}
-// Überlappung relativ zur kleineren Box (fängt Teilboxen an Kachelrändern)
-function containment(a, b) {
-  const ax2 = a[0] + a[2], ay2 = a[1] + a[3], bx2 = b[0] + b[2], by2 = b[1] + b[3];
-  const iw = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
-  const ih = Math.max(0, Math.min(ay2, by2) - Math.max(a[1], b[1]));
-  const m = Math.min(a[2] * a[3], b[2] * b[3]);
-  return m > 0 ? (iw * ih) / m : 0;
-}
-// Detektionen aus mehreren Durchläufen (Vollbild + Kacheln) zusammenführen
-function mergeDetections(dets) {
-  dets.sort((a, b) => (b.firm - a.firm) || (b.score - a.score));
-  const kept = [];
-  for (const d of dets) {
-    let dup = false;
-    for (const k of kept) {
-      if (iou(k.box, d.box) > 0.45 || containment(k.box, d.box) > 0.7) { dup = true; if (d.firm && !k.firm) { k.firm = true; k.cls = d.cls; k.score = d.score; } break; }
-    }
-    if (!dup) kept.push(d);
-  }
-  return kept;
-}
-function updateTracks(dets, now) {
-  const used = new Set();
-  tracks.sort((a, b) => b.hits - a.hits);
-  for (const t of tracks) {
-    let best = -1, bestIou = 0.25;
-    dets.forEach((d, i) => { if (used.has(i)) return; const v = iou(t.box, d.box); if (v > bestIou) { bestIou = v; best = i; } });
-    if (best >= 0) {
-      used.add(best); const d = dets[best]; const a = 0.55;
-      for (let k = 0; k < 4; k++) t.box[k] = t.box[k] * (1 - a) + d.box[k] * a;
-      if (d.firm || !t.firm) { t.cls = d.cls; t.score = d.score; }
-      if (d.firm) t.firm = true;
-      t.hits++; t.missed = 0; t.lastSeen = now;
-    } else { t.missed++; }
-  }
-  dets.forEach((d, i) => {
-    if (used.has(i)) return;
-    tracks.push({ id: nextId, box: d.box.slice(), cls: d.cls, score: d.score, firm: !!d.firm, verified: false, clsRuns: 0, hits: 1, missed: 0, born: now, lastSeen: now, lastCls: 0, votes: new Map(), species: null, conf: 0, logged: false, color: COLORS[(nextId - 1) % COLORS.length] });
-    nextId++;
-  });
-  tracks = tracks.filter((t) => {
-    if (t.missed > 10 || (t.hits < 2 && t.missed > 2)) return false;
-    // Schwache Kandidaten (kleine oder fremde Boxen) brauchen eine Bestätigung durch den Artenkopf
-    if (!t.firm && !t.verified && (t.clsRuns >= 2 || (t.clsRuns >= 1 && now - t.born > 2500))) return false;
-    return true;
-  });
-}
-const isShown = (t) => t.hits >= 2 && (t.firm || t.verified);
-
-/* Artbestimmung pro Track (Ausschnitt -> MobileNet, gewichtete Stimmen über mehrere Durchläufe) */
-async function classifyPending() {
-  const now = performance.now();
-  const cand = tracks
-    .filter((t) => t.missed === 0 && (t.hits >= 2 || !t.firm) && now - t.lastCls > (t.species && t.sure ? 900 : 300))
-    .sort((a, b) => (a.firm - b.firm) || (a.lastCls - b.lastCls))[0];
-  if (!cand) return;
-  cand.lastCls = now; cand.clsRuns++;
-  const vw = video.videoWidth, vh = video.videoHeight;
-  const [x, y, w, h] = cand.box;
-  if (w < 12 || h < 12) return;
-  const padF = 0.12;
-  const side = Math.min(Math.max(w, h) * (1 + 2 * padF), vw, vh);
-  let qx = x + w / 2 - side / 2, qy = y + h / 2 - side / 2;
-  qx = Math.max(0, Math.min(qx, vw - side)); qy = Math.max(0, Math.min(qy, vh - side));
-  cctx.drawImage(video, qx, qy, side, side, 0, 0, 224, 224);
-  if (head) {
-    const r = await runHead(clsCanvas);
-    if (!r) return;
-    const p = r.probs;
-    cand.probs = cand.probs ? cand.probs.map((v, i) => v * 0.6 + p[i] * 0.4) : p;
-    const d = decideSpecies(cand.probs);
-    cand.species = d.name; cand.conf = d.conf; cand.other = d.other; cand.sure = d.sure;
-    // Ein schwacher Kandidat gilt als bestätigt, sobald der Artenkopf eine Art klar erkennt
-    if (!cand.firm && d.name && !d.other && d.conf >= 0.6) cand.verified = true;
-    if (d.sure) maybeLog(cand);
-    return;
-  }
-  let res;
-  try { res = await classifier.classify(clsCanvas, 5); } catch (e) { console.error(e); return; }
-  for (const [k, v] of cand.votes) cand.votes.set(k, v * 0.7);
-  let eleP = 0, hippoP = 0;
-  for (const r of res) {
-    const sp = speciesFor(r.className);
-    if (!sp) continue;
-    if (sp === 'Elefant') eleP += r.probability;
-    if (sp === 'Flusspferd') hippoP += r.probability;
-    const weight = sp.endsWith('?') ? 0.8 : 1;
-    cand.votes.set(sp, (cand.votes.get(sp) || 0) + r.probability * weight);
-  }
-  const direct = COCO_DIRECT[cand.cls];
-  let directW = 0.9;
-  // Grosses graues Tier, das der Detektor für einen Elefanten hält, der Klassifikator aber nicht: in Südafrika meist ein Nashorn.
-  if (cand.cls === 'elephant' && eleP < 0.2 && hippoP < 0.3) {
-    cand.votes.set('Nashorn?', (cand.votes.get('Nashorn?') || 0) + 0.6);
-    directW = 0.2;
-  }
-  if (direct) cand.votes.set(direct, (cand.votes.get(direct) || 0) + cand.score * directW);
-  let bestName = null, bestV = 0, total = 0;
-  for (const [k, v] of cand.votes) { total += v; if (v > bestV) { bestV = v; bestName = k; } }
-  if (bestName && bestV >= 0.12) { cand.species = bestName; cand.conf = total > 0 ? bestV / total : 0; }
-  else { cand.species = null; cand.conf = 0; }
-  cand.sure = !!cand.species && !cand.species.endsWith('?');
-  if (cand.sure) maybeLog(cand);
-}
-
-/* Artenkopf: Embedding aus demselben MobileNet, dann kleiner Klassifikator */
-async function runHead(canvas) {
-  let out;
-  try {
-    out = tf.tidy(() => head.predict(classifier.infer(canvas, true)));
-    const probs = Array.from(await out.data());
-    return { probs };
-  } catch (e) { console.error(e); return null; }
-  finally { if (out) out.dispose(); }
-}
-// Entscheidet aus den (geglätteten) Wahrscheinlichkeiten, was angezeigt wird.
-function decideSpecies(probs) {
-  const cls = headMeta.classes;
-  const order = probs.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]);
-  const [p1, i1] = order[0], [p2, i2] = order[1];
-  const c1 = cls[i1], c2 = cls[i2];
-  if (c1.negative) {
-    // Haustier oder Ähnliches: kein Safari-Tier, aber als Tier markieren
-    return { name: 'Anderes Tier', conf: p1, sure: false, other: true };
-  }
-  // Sammelname, wenn zwei Klassen derselben Gruppe sich den Spitzenplatz teilen
-  if (c1.group && c2.group === c1.group && p1 - p2 < 0.3) {
-    return { name: c1.group, conf: p1 + p2, sure: p1 + p2 >= 0.5, other: false };
-  }
-  // Zu unsicher für einen Artnamen: nur der grobe Detektor-Hinweis bleibt
-  if (p1 < 0.35) return { name: null, conf: p1, sure: false, other: false };
-  return { name: c1.name, conf: p1, sure: p1 >= 0.5, other: false };
-}
-
-/* Hinweis ohne Rahmen: wenn der Detektor nichts findet, wird die Bildmitte geprüft (Krokodil, Schildkröte, Waran, Schliefer) */
-async function idleHint(now) {
-  if (!head) return;
-  const active = tracks.some((t) => isShown(t) && t.missed === 0);
-  if (active) { hintRuns = []; if (hint && now > hint.until) hint = null; return; }
-  if (now - lastHintAt < 700) return;
-  lastHintAt = now;
-  const reg = visibleRegion();
-  // Abwechselnd grosser und kleiner Mittelausschnitt (kleiner für ferne Tiere)
-  hintFlip = !hintFlip;
-  const side = Math.min(reg.w, reg.h) * (hintFlip ? 0.7 : 0.4);
-  cctx.drawImage(video, reg.x + (reg.w - side) / 2, reg.y + (reg.h - side) / 2, side, side, 0, 0, 224, 224);
-  const r = await runHead(clsCanvas);
-  if (!r) return;
-  const d = decideSpecies(r.probs);
-  hintRuns.push(d); if (hintRuns.length > 4) hintRuns.shift();
-  const same = d.name ? hintRuns.filter((x) => x.name === d.name && !x.other && x.conf >= 0.6).length : 0;
-  if (same >= 2 && !d.other) {
-    hint = { name: d.name, conf: d.conf, until: now + 1800 };
-    if (same >= 4 && d.conf >= 0.7) logSighting(d.name, true);
-  } else if (hint && now > hint.until) hint = null;
-}
-
-/* ---------- Sichtungen ---------- */
-function maybeLog(t) {
-  if (t.logged || !t.species || !t.sure || t.other) return;
-  if (t.hits < 4 || performance.now() - t.born < 1200) return;
-  t.logged = true;
-  logSighting(t.species);
-}
-let lastHintLog = { name: '', t: 0 };
-function logSighting(name, fromHint) {
-  const now = Date.now();
-  if (fromHint) {
-    if (lastHintLog.name === name && now - lastHintLog.t < 60000) return;
-    lastHintLog = { name, t: now };
-  }
-  const last = sightings[sightings.length - 1];
-  if (last && last.s === name && now - last.t < 30000) { last.n = (last.n || 1) + 1; last.t = now; }
-  else sightings.push({ s: name, t: now, n: 1 });
-  store.set('ss.sightings', sightings);
-  renderSightings();
-}
-function renderSightings() {
-  const list = $('#sightList'), empty = $('#sightEmpty');
-  const total = sightings.reduce((a, e) => a + (e.n || 1), 0);
-  $('#sightCount').textContent = String(total);
-  list.innerHTML = '';
-  empty.hidden = sightings.length > 0;
-  [...sightings].reverse().forEach((e) => {
-    const li = document.createElement('li');
-    const name = document.createElement('span'); name.textContent = e.s;
-    const n = document.createElement('span'); n.className = 'n'; n.textContent = (e.n || 1) + '×';
-    const tm = document.createElement('span'); tm.className = 't'; tm.textContent = fmtTime(e.t);
-    li.append(name, n, tm); list.appendChild(li);
-  });
-}
-function sightingsText() {
-  const d = new Date().toLocaleDateString('de-CH');
-  return 'Sichtungen ' + d + '\n' + [...sightings].reverse().map((e) => fmtTime(e.t) + '  ' + e.s + (e.n > 1 ? ' (' + e.n + '×)' : '')).join('\n');
-}
-$('#btnSightings').addEventListener('click', () => { renderSightings(); openSheet('#sheetSightings'); });
-$('#btnShareSight').addEventListener('click', async () => {
-  if (!sightings.length) { toast('Noch keine Sichtungen'); return; }
-  const text = sightingsText();
-  try {
-    if (navigator.share) { await navigator.share({ title: 'Safari Sichtungen', text }); return; }
-    await navigator.clipboard.writeText(text); toast('Liste kopiert');
-  } catch (e) { if (e && e.name !== 'AbortError') toast('Teilen nicht möglich'); }
-});
-$('#btnClearSight').addEventListener('click', () => {
-  sightings = []; store.set('ss.sightings', sightings); tracks.forEach((t) => { t.logged = true; }); renderSightings(); toast('Liste geleert');
-});
-
-/* ---------- Erkennungsschleife ---------- */
-// Ein Detektor-Durchlauf über einen Ausschnitt (Videokoordinaten). Der Detektor rechnet intern immer mit 300×300 Pixeln,
-// darum werden ferne Tiere nur sichtbar, wenn man ihm Kacheln statt des ganzen Bildes gibt.
-const BLOCKED_COCO = new Set(['person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck', 'boat', 'airplane']);
-async function detectRegion(x, y, w, h, size, isTile) {
-  const dw = size, dh = Math.max(32, Math.round(size * h / w));
-  if (detCanvas.width !== dw || detCanvas.height !== dh) { detCanvas.width = dw; detCanvas.height = dh; }
-  dctx.drawImage(video, x, y, w, h, 0, 0, dw, dh);
-  const minScore = Math.max(0.12, settings.threshold * 0.4);
-  const preds = await detector.detect(detCanvas, 10, minScore);
-  const sx = w / dw, sy = h / dh;
-  const out = [];
-  for (const p of preds) {
-    if (BLOCKED_COCO.has(p.class)) continue;
-    const box = [x + p.bbox[0] * sx, y + p.bbox[1] * sy, p.bbox[2] * sx, p.bbox[3] * sy];
-    // Boxen, die an einem Kachelrand kleben, sind oft abgeschnitten: nur als schwache Kandidaten
-    const edge = isTile && (p.bbox[0] < 2 || p.bbox[1] < 2 || p.bbox[0] + p.bbox[2] > dw - 2 || p.bbox[1] + p.bbox[3] > dh - 2);
-    const firm = ANIMAL_COCO.has(p.class) && p.score >= settings.threshold && !edge;
-    out.push({ box, cls: p.class, score: p.score, firm });
-  }
-  return out;
-}
-function tileGrid(reg, n) {
-  // n×n Kacheln mit Überlappung, jede deckt (1/n + 0.15) des Ausschnitts
-  const tiles = [];
-  const fw = Math.min(1, 1 / n + 0.15), fh = Math.min(1, 1 / n + 0.15);
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-    const fx = n === 1 ? 0 : (i / (n - 1)) * (1 - fw), fy = n === 1 ? 0 : (j / (n - 1)) * (1 - fh);
-    tiles.push({ x: reg.x + fx * reg.w, y: reg.y + fy * reg.h, w: fw * reg.w, h: fh * reg.h });
-  }
-  return tiles;
-}
-async function detectLoop() {
-  while (running) {
-    if (!syncCanvases() || video.paused) { await sleep(60); continue; }
-    const t0 = performance.now();
-    const reg = visibleRegion();
-    let dets = [];
-    try {
-      dets = await detectRegion(reg.x, reg.y, reg.w, reg.h, 416, false);
-      const n = settings.far === 'max' ? 3 : settings.far === 'off' ? 0 : 2;
-      if (n) {
-        for (const t of tileGrid(reg, n)) {
-          if (!running) break;
-          dets = dets.concat(await detectRegion(t.x, t.y, t.w, t.h, 320, true));
-        }
-      }
-    } catch (e) { console.error(e); await sleep(250); continue; }
-    dets = mergeDetections(dets);
-    // Höchstens drei schwache Kandidaten pro Durchlauf, sinnvoll gross, damit die Bestätigung nicht verhungert
-    const minSide = Math.min(reg.w, reg.h) * 0.03, maxSide = Math.max(reg.w, reg.h) * 0.9;
-    let weak = 0;
-    dets = dets.filter((d) => {
-      if (d.firm) return true;
-      if (d.box[2] < minSide || d.box[3] < minSide || d.box[2] > maxSide || d.box[3] > maxSide) return false;
-      return ++weak <= 3;
-    });
-    updateTracks(dets, performance.now());
-    await classifyPending();
-    await idleHint(performance.now());
-    const dt = performance.now() - t0;
-    detFps = detFps * 0.8 + (1000 / Math.max(dt, 1)) * 0.2;
-    if (dt < 50) await sleep(50 - dt);
-  }
-}
-
-/* ---------- Zeichnen ---------- */
-function roundRect(ctx, x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-}
-// map: Videokoordinaten -> Zielkoordinaten; px: Grösse eines CSS-Pixels im Ziel
-function drawOverlay(ctx, map, px) {
-  for (const t of tracks) {
-    if (!isShown(t)) continue;
-    const [x, y, w, h] = t.box;
-    const X = (x - map.ox) * map.k, Y = (y - map.oy) * map.k, W = w * map.k, H = h * map.k;
-    const sure = !!t.sure;
-    ctx.lineWidth = 2.2 * px;
-    ctx.strokeStyle = t.color;
-    ctx.setLineDash(sure ? [] : [7 * px, 5 * px]);
-    roundRect(ctx, X, Y, W, H, 10 * px); ctx.stroke();
-    ctx.setLineDash([]);
-    // Ecken betonen
-    const c = Math.min(16 * px, W / 3, H / 3);
-    ctx.lineWidth = 4 * px; ctx.beginPath();
-    ctx.moveTo(X, Y + c); ctx.lineTo(X, Y); ctx.lineTo(X + c, Y);
-    ctx.moveTo(X + W - c, Y); ctx.lineTo(X + W, Y); ctx.lineTo(X + W, Y + c);
-    ctx.moveTo(X + W, Y + H - c); ctx.lineTo(X + W, Y + H); ctx.lineTo(X + W - c, Y + H);
-    ctx.moveTo(X + c, Y + H); ctx.lineTo(X, Y + H); ctx.lineTo(X, Y + H - c);
-    ctx.stroke();
-    if (!settings.labels) continue;
-    const name = t.species ? (t.sure || t.other || t.species.endsWith('?') ? t.species : t.species + '?') : (COCO_FALLBACK[t.cls] || 'Tier');
-    const sub = t.other ? 'kein Safari-Tier' : t.species ? Math.round(Math.min(t.conf, 0.99) * 100) + ' %' : 'unbestimmt';
-    const fs = 14 * px;
-    ctx.font = '600 ' + fs + 'px ' + '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    const tw = ctx.measureText(name).width;
-    ctx.font = '500 ' + (fs * 0.8) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    const sw = ctx.measureText(sub).width;
-    const padX = 8 * px, gap = 7 * px, chipH = fs * 1.9;
-    const chipW = tw + sw + padX * 2 + gap;
-    let cx = X, cy = Y - chipH - 4 * px;
-    if (cy < 0) cy = Y + 4 * px;
-    if (cx + chipW > ctx.canvas.width) cx = Math.max(0, ctx.canvas.width - chipW);
-    ctx.fillStyle = sure ? t.color : 'rgba(13,15,11,0.82)';
-    roundRect(ctx, cx, cy, chipW, chipH, 7 * px); ctx.fill();
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = sure ? '#1a1206' : '#f4f0e6';
-    ctx.font = '600 ' + fs + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText(name, cx + padX, cy + chipH / 2);
-    ctx.fillStyle = sure ? 'rgba(26,18,6,0.72)' : '#b5b0a2';
-    ctx.font = '500 ' + (fs * 0.8) + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText(sub, cx + padX + tw + gap, cy + chipH / 2);
-  }
-  // Hinweis ohne Rahmen (Bildmitte)
-  if (hint && settings.labels && performance.now() < hint.until) {
-    const fs = 15 * px;
-    const label = hint.name + '  ' + Math.round(Math.min(hint.conf, 0.99) * 100) + ' %';
-    ctx.font = '600 ' + fs + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    const tw = ctx.measureText(label).width, padX = 12 * px, chipH = fs * 2.1, chipW = tw + padX * 2;
-    const cw = map.w || ctx.canvas.width, ch = map.h || ctx.canvas.height;
-    const cx = (map.x0 || 0) + (cw - chipW) / 2, cy = (map.y0 || 0) + ch * 0.62;
-    ctx.fillStyle = 'rgba(13,15,11,0.82)';
-    roundRect(ctx, cx, cy, chipW, chipH, 9 * px); ctx.fill();
-    ctx.strokeStyle = '#f0a93a'; ctx.lineWidth = 1.5 * px; ctx.stroke();
-    ctx.fillStyle = '#f4f0e6'; ctx.textBaseline = 'middle';
-    ctx.fillText(label, cx + padX, cy + chipH / 2);
-  }
-}
-let fpsTick = 0;
-function render() {
-  if (!running) return;
-  requestAnimationFrame(render);
-  if (!syncCanvases()) return;
-  const reg = visibleRegion();
-  const px = 1 / reg.cssScale;
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  drawOverlay(octx, { ox: 0, oy: 0, k: 1, x0: reg.x, y0: reg.y, w: reg.w, h: reg.h }, px);
-  if (isRecording && settings.burnIn && recMap) {
-    const RW = recCanvas.width, RH = recCanvas.height;
-    // Ausschnitt mit festem Seitenverhältnis der Aufnahme
-    let cw = reg.w, ch = cw * RH / RW;
-    if (ch > reg.h) { ch = reg.h; cw = ch * RW / RH; }
-    const cx0 = reg.x + (reg.w - cw) / 2, cy0 = reg.y + (reg.h - ch) / 2;
-    rctx.drawImage(video, cx0, cy0, cw, ch, 0, 0, RW, RH);
-    const k = RW / cw;
-    drawOverlay(rctx, { ox: cx0, oy: cy0, k, x0: 0, y0: 0, w: RW, h: RH }, k / reg.cssScale);
-    const fsw = Math.round(RH * 0.028);
-    rctx.font = '500 ' + fsw + 'px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    rctx.textBaseline = 'alphabetic'; rctx.textAlign = 'right';
-    rctx.fillStyle = 'rgba(0,0,0,0.45)'; rctx.fillText(recStamp, RW - fsw + 1, RH - fsw + 1);
-    rctx.fillStyle = 'rgba(244,240,230,0.9)'; rctx.fillText(recStamp, RW - fsw, RH - fsw);
-    rctx.textAlign = 'left';
-  }
-  if (++fpsTick % 15 === 0) {
-    const n = tracks.filter(isShown).length;
-    $('#fps').textContent = Math.round(detFps) + ' fps';
-    const hinting = n === 0 && hint && performance.now() < hint.until;
-    setStatus(hinting ? hint.name + ' vermutet' : n === 0 ? 'Suche Tiere …' : n === 1 ? '1 Tier im Bild' : n + ' Tiere im Bild', true);
-  }
-}
-let recStamp = '';
-
-/* ---------- Aufnahme ---------- */
-function pickMime() {
-  if (typeof MediaRecorder === 'undefined') return null;
-  const c = ['video/mp4;codecs=avc1', 'video/mp4;codecs=h264', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
-  return c.find((m) => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || '';
-}
-async function startRecording() {
-  if (!stream || isRecording) return;
-  if (typeof MediaRecorder === 'undefined') { toast('Dieser Browser kann nicht aufnehmen'); return; }
-  chunks = [];
-  const reg = visibleRegion();
-  let ms;
-  if (settings.burnIn) {
-    const RW = Math.min(1280, Math.round(reg.w)) & ~1;
-    const RH = Math.round(RW * reg.h / reg.w) & ~1;
-    recCanvas.width = RW; recCanvas.height = RH; recMap = { RW, RH };
-    rctx.drawImage(video, reg.x, reg.y, reg.w, reg.h, 0, 0, RW, RH);
-    ms = recCanvas.captureStream(30);
-  } else {
-    recMap = null;
-    ms = new MediaStream([stream.getVideoTracks()[0]]);
-  }
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micStream.getAudioTracks().forEach((t) => ms.addTrack(t));
-  } catch (e) { micStream = null; }
-  recMime = pickMime();
-  try {
-    recorder = new MediaRecorder(ms, recMime ? { mimeType: recMime, videoBitsPerSecond: 8e6 } : { videoBitsPerSecond: 8e6 });
-  } catch (e) { console.error(e); toast('Aufnahme konnte nicht gestartet werden'); return; }
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = finishRecording;
-  recorder.onerror = (e) => { console.error(e); toast('Aufnahmefehler'); };
-  recStamp = 'Safari Spotter · ' + new Date().toLocaleDateString('de-CH') + ' ' + fmtTime(Date.now());
-  recorder.start(1000);
-  isRecording = true; recStart = Date.now();
-  $('#btnRecord').classList.add('on'); $('#btnRecord').setAttribute('aria-label', 'Aufnahme stoppen');
-  $('#recTimer').hidden = false; $('#recTimer').textContent = '00:00';
-  recTimerId = setInterval(() => {
-    const s = Math.floor((Date.now() - recStart) / 1000);
-    $('#recTimer').textContent = pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
-  }, 500);
-}
-function stopRecording() {
-  if (!isRecording) return;
-  isRecording = false;
-  clearInterval(recTimerId);
-  $('#btnRecord').classList.remove('on'); $('#btnRecord').setAttribute('aria-label', 'Aufnahme starten');
-  $('#recTimer').hidden = true;
-  try { recorder.stop(); } catch (e) { finishRecording(); }
-}
-function finishRecording() {
-  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
-  if (!chunks.length) { toast('Keine Aufnahme entstanden'); return; }
-  const type = (recMime && recMime.split(';')[0]) || chunks[0].type || 'video/mp4';
-  const blob = new Blob(chunks, { type });
-  const ext = type.includes('mp4') ? 'mp4' : 'webm';
-  const d = new Date();
-  const name = 'safari-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + '.' + ext;
-  if (lastClip && lastClip.url) URL.revokeObjectURL(lastClip.url);
-  lastClip = { blob, name, type, url: URL.createObjectURL(blob) };
-  const v = $('#clipVideo'); v.src = lastClip.url;
-  const secs = Math.round((Date.now() - recStart) / 1000);
-  $('#clipInfo').textContent = secs + ' s · ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB · ' + ext.toUpperCase();
-  const a = $('#btnSaveClip'); a.href = lastClip.url; a.download = name;
-  openSheet('#sheetClip');
-}
-$('#btnRecord').addEventListener('click', () => { if (isRecording) stopRecording(); else startRecording(); });
-$('#btnShareClip').addEventListener('click', async () => {
-  if (!lastClip) return;
-  const file = new File([lastClip.blob], lastClip.name, { type: lastClip.type });
-  try {
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Safari Aufnahme' }); return; }
-    toast('Teilen nicht möglich, bitte „In Dateien speichern“');
-  } catch (e) { if (e && e.name !== 'AbortError') toast('Teilen abgebrochen'); }
-});
-$('#btnDiscardClip').addEventListener('click', () => {
-  if (lastClip && lastClip.url) URL.revokeObjectURL(lastClip.url);
-  lastClip = null; $('#clipVideo').removeAttribute('src'); closeSheets();
-});
-
-/* ---------- Einstellungen ---------- */
-function bindSettings() {
-  const thr = $('#thr'); thr.value = settings.threshold;
-  $('#thrVal').textContent = 'Schwelle ' + Math.round(settings.threshold * 100) + ' %';
-  thr.addEventListener('input', () => { settings.threshold = parseFloat(thr.value); $('#thrVal').textContent = 'Schwelle ' + Math.round(settings.threshold * 100) + ' %'; store.set('ss.settings', settings); });
-  const sw = (id, key) => {
-    const el = $(id); el.setAttribute('aria-checked', String(!!settings[key]));
-    el.addEventListener('click', () => { settings[key] = !settings[key]; el.setAttribute('aria-checked', String(settings[key])); store.set('ss.settings', settings); });
-  };
-  sw('#swLabels', 'labels'); sw('#swBurn', 'burnIn');
-  const far = $('#far'); far.value = ['off', 'on', 'max'].includes(settings.far) ? settings.far : 'on';
-  far.addEventListener('change', () => { settings.far = far.value; store.set('ss.settings', settings); });
-  const res = $('#res'); res.value = settings.res;
-  res.addEventListener('change', () => { settings.res = res.value; store.set('ss.settings', settings); toast('Gilt ab dem nächsten Kamerastart'); });
-  $('#ver').textContent = 'v' + VERSION;
-  $('#btnSettings').addEventListener('click', () => openSheet('#sheetSettings'));
-  $('#btnReload').addEventListener('click', async () => {
-    try {
-      if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); }
-      if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); }
-    } catch (e) { /* egal */ }
-    location.reload();
-  });
-  $('#btnStopCam').addEventListener('click', () => { stopAll(); closeSheets(); });
-}
-
-/* ---------- Start / Stopp ---------- */
-async function keepAwake() {
-  try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
-}
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && running) { keepAwake(); video.play().catch(() => {}); }
-});
-function showGateError(msg) {
-  const e = $('#gateErr'); e.textContent = msg; e.hidden = false;
-}
-async function startAll() {
-  $('#gateErr').hidden = true;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showGateError('Dieser Browser gibt die Kamera nicht frei. Bitte die Seite direkt in Safari öffnen (nicht in einer App-Vorschau).');
-    return;
-  }
-  $('#btnStart').disabled = true; $('#btnStartText').textContent = 'Kamera wird gestartet …';
-  try {
-    await startCamera(null);
-  } catch (e) {
-    console.error(e);
-    $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
-    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
-    showGateError(denied
-      ? 'Kamerazugriff abgelehnt. In Safari: „aA“ links in der Adresszeile tippen, Website-Einstellungen, Kamera erlauben. Dann erneut starten.'
-      : 'Kamera nicht verfügbar (' + (e && e.name ? e.name : 'Fehler') + '). Läuft sie gerade in einer anderen App?');
-    return;
-  }
-  running = true;
-  $('#gate').hidden = true;
-  $('#btnRecord').disabled = false;
-  setStatus('Suche Tiere …', true);
-  keepAwake();
-  requestAnimationFrame(render);
-  detectLoop();
-}
-function stopAll() {
-  if (isRecording) stopRecording();
-  running = false;
-  stopStream();
-  tracks = [];
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  $('#btnRecord').disabled = true;
-  $('#zoomWrap').hidden = true; $('#lens').hidden = true;
-  setStatus('Bereit', false); $('#fps').textContent = '';
-  $('#gate').hidden = false;
-  $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
-  if (wakeLock) { try { wakeLock.release(); } catch (e) { /* egal */ } wakeLock = null; }
-}
-$('#btnStart').addEventListener('click', startAll);
-window.addEventListener('pagehide', () => { if (isRecording) stopRecording(); });
-
-/* ---------- Hochfahren ---------- */
-window.__spotter = { state: () => ({ version: VERSION, head: !!head, tracks: tracks.map((t) => ({ id: t.id, cls: t.cls, species: t.species, conf: t.conf, sure: t.sure, hits: t.hits })), hint, hintRuns: hintRuns.slice(), detFps }) };
-bindSettings();
-renderSightings();
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
-}
-(async () => {
-  try {
-    await loadModels();
-    $('#btnStart').disabled = false; $('#btnStartText').textContent = 'Kamera starten';
-  } catch (e) {
-    console.error(e);
-    $('#loadText').textContent = 'Modelle konnten nicht geladen werden. Internetverbindung prüfen und die Seite neu laden.';
-    showGateError('Fehler beim Laden der KI-Modelle: ' + (e && e.message ? e.message : e));
-    $('#btnStartText').textContent = 'Modelle fehlen';
-  }
-})();
-})();
-</script>
+<script src="vendor/leaflet.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
