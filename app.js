@@ -968,7 +968,7 @@ async function renderGallery() {
   photoCount = galleryItems.length; updatePhotoBadge();
   const grid = $('#galleryGrid'); grid.innerHTML = '';
   $('#galleryEmpty').hidden = galleryItems.length > 0;
-  $('#galleryInfo').textContent = galleryItems.length ? galleryItems.length + ' Fotos · ' + Math.round(galleryItems.reduce((a, p) => a + (p.blob ? p.blob.size : 0), 0) / 1048576) + ' MB auf dem Gerät' : '';
+  $('#galleryInfo').textContent = galleryItems.length ? galleryItems.length + ' Fotos · ' + (galleryItems.reduce((a, p) => a + (p.blob ? p.blob.size : 0), 0) / 1048576).toFixed(1).replace('.', ',') + ' MB auf dem Gerät' : '';
   galleryItems.forEach((ph, i) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'gthumb'; b.setAttribute('aria-label', (ph.species[0] || 'Foto') + ' ' + fmtTime(ph.t));
     const im = document.createElement('img'); im.src = ph.thumb || ''; im.alt = ''; im.loading = 'lazy';
