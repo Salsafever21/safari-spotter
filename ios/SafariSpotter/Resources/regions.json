@@ -1,0 +1,163 @@
+{
+  "_comment": "Regionen für das Standort-Vorwissen. bbox = [südl. Breite, westl. Länge, nördl. Breite, östl. Länge]. unlikely = Klassen, die dort nicht oder praktisch nie vorkommen; ihre Wahrscheinlichkeit wird mit factor multipliziert (nie auf null gesetzt, damit klare Bilder trotzdem gewinnen).",
+  "factor": 0.25,
+  "regions": [
+    {
+      "key": "kruger",
+      "name": "Kruger und Lowveld",
+      "bbox": [
+        -25.9,
+        30.4,
+        -22.2,
+        32.2
+      ],
+      "unlikely": [
+        "brillenpinguin",
+        "seebaer",
+        "springbock",
+        "oryx",
+        "blessbock",
+        "loeffelhund",
+        "erdmaennchen",
+        "flamingo"
+      ]
+    },
+    {
+      "key": "nordwest",
+      "name": "Pilanesberg und Madikwe",
+      "bbox": [
+        -25.7,
+        25.8,
+        -24.4,
+        27.6
+      ],
+      "unlikely": [
+        "brillenpinguin",
+        "seebaer",
+        "nyala",
+        "rappenantilope",
+        "sattelstorch",
+        "hornrabe"
+      ]
+    },
+    {
+      "key": "kzn",
+      "name": "KwaZulu-Natal (Hluhluwe, iSimangaliso)",
+      "bbox": [
+        -29.6,
+        30.4,
+        -26.7,
+        33.0
+      ],
+      "unlikely": [
+        "brillenpinguin",
+        "seebaer",
+        "springbock",
+        "oryx",
+        "erdmaennchen",
+        "loeffelhund",
+        "rappenantilope"
+      ]
+    },
+    {
+      "key": "ostkap",
+      "name": "Ostkap und Garden Route (Addo, Plettenberg Bay)",
+      "bbox": [
+        -34.4,
+        22.0,
+        -31.9,
+        27.6
+      ],
+      "unlikely": [
+        "nilkrokodil",
+        "gelbschnabeltoko",
+        "hornrabe",
+        "marabu",
+        "sattelstorch",
+        "gaukler",
+        "rappenantilope",
+        "nyala",
+        "wildhund",
+        "flusspferd"
+      ]
+    },
+    {
+      "key": "westkap",
+      "name": "Westkap (Kap, De Hoop, Overberg)",
+      "bbox": [
+        -35.0,
+        17.7,
+        -31.4,
+        22.0
+      ],
+      "unlikely": [
+        "nilkrokodil",
+        "nilwaran",
+        "gelbschnabeltoko",
+        "hornrabe",
+        "marabu",
+        "sattelstorch",
+        "gaukler",
+        "wildhund",
+        "tuepfelhyaene",
+        "impala",
+        "nyala",
+        "rappenantilope",
+        "wasserbock",
+        "flusspferd",
+        "kaffernbueffel"
+      ]
+    },
+    {
+      "key": "kalahari",
+      "name": "Kalahari und Nordkap (Kgalagadi, Augrabies, Tswalu)",
+      "bbox": [
+        -30.0,
+        18.5,
+        -24.3,
+        24.6
+      ],
+      "unlikely": [
+        "brillenpinguin",
+        "seebaer",
+        "flusspferd",
+        "nilkrokodil",
+        "nilwaran",
+        "nyala",
+        "buschbock",
+        "wasserbock",
+        "kaffernbueffel",
+        "elefant",
+        "impala",
+        "hornrabe",
+        "marabu",
+        "sattelstorch",
+        "hammerkopf",
+        "klippschliefer"
+      ]
+    },
+    {
+      "key": "highveld",
+      "name": "Highveld und Freistaat",
+      "bbox": [
+        -30.0,
+        24.6,
+        -25.7,
+        30.4
+      ],
+      "unlikely": [
+        "brillenpinguin",
+        "seebaer",
+        "nilkrokodil",
+        "hornrabe",
+        "marabu",
+        "sattelstorch",
+        "gelbschnabeltoko",
+        "nyala",
+        "wildhund",
+        "rappenantilope",
+        "elefant"
+      ]
+    }
+  ]
+}

@@ -31,4 +31,8 @@ node train.js                  # Kopf trainieren, Bericht in report.json, Export
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
 
-Version: 1.5.0
+## Native iOS-App
+
+`ios/` enthält die Vorbereitung für eine echte iOS-App mit denselben Funktionen: beide Modelle als Core ML (`ios/Models/`, Konvertierung in `training/coreml/`), ein SwiftUI-Projekt (`xcodegen generate` in `ios/`) und ein Abgleich der Swift-Logik mit `app.js` (`ios/Tools/logic-check/run.sh`). Der eigene Ein-Modell-Detektor (YOLO) ist in `training/yolo/` vorbereitet. Details in `ios/README.md`.
+
+Version: 1.5.0 (Web), iOS-Vorbereitung 1.0.0

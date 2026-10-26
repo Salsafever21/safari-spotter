@@ -25,6 +25,8 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
+      # Nur die Web-App veröffentlichen; iOS-Projekt, Core-ML-Modelle und Trainingsskripte gehören nicht auf die Seite
+      - run: rm -rf ios training .github
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .

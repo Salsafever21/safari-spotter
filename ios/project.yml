@@ -1,0 +1,44 @@
+# XcodeGen-Spezifikation: `brew install xcodegen` und im Ordner ios/ `xcodegen generate`, dann SafariSpotter.xcodeproj öffnen.
+name: SafariSpotter
+options:
+  bundleIdPrefix: ch.solution21
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""   # eigene Team-ID eintragen oder in Xcode unter Signing wählen
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    COREML_CODEGEN_LANGUAGE: Swift
+targets:
+  SafariSpotter:
+    type: application
+    platform: iOS
+    sources:
+      - path: SafariSpotter
+      # Alle Core-ML-Modelle (auch ein späteres SafariSpotterYolo.mlpackage, siehe training/yolo/README.md); Xcode erzeugt die Swift-Klassen
+      - path: Models
+        buildPhase: sources
+        excludes: ["*.json"]
+    info:
+      path: SafariSpotter/Info.plist
+      properties:
+        CFBundleDisplayName: Safari Spotter
+        UILaunchScreen: {}
+        UIBackgroundModes: [location]
+        NSCameraUsageDescription: Die Kamera erkennt Tiere live im Bild.
+        NSMicrophoneUsageDescription: Für den Ton in Videoaufnahmen.
+        NSLocationWhenInUseUsageDescription: Standort für Sichtungen, Region und die Game-Drive-Aufzeichnung.
+        NSLocationAlwaysAndWhenInUseUsageDescription: Damit die Game-Drive-Aufzeichnung auch weiterläuft, wenn das iPhone gesperrt ist.
+        NSPhotoLibraryAddUsageDescription: Zum Sichern der Fotos mit Standort und Datum in deine Mediathek.
+        NSPhotoLibraryUsageDescription: Zum Analysieren von Bildern aus der Mediathek.
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
