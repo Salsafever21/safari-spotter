@@ -1,0 +1,527 @@
+{
+ "version": "1.2.1",
+ "trained": "2026-10-25",
+ "valTop1": 80.2,
+ "classes": [
+  {
+   "key": "elefant",
+   "name": "Elefant",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Loxodonta africana"
+  },
+  {
+   "key": "breitmaulnashorn",
+   "name": "Breitmaulnashorn",
+   "group": "Nashorn",
+   "negative": false,
+   "sensitive": true,
+   "latin": "Ceratotherium simum"
+  },
+  {
+   "key": "spitzmaulnashorn",
+   "name": "Spitzmaulnashorn",
+   "group": "Nashorn",
+   "negative": false,
+   "sensitive": true,
+   "latin": "Diceros bicornis"
+  },
+  {
+   "key": "flusspferd",
+   "name": "Flusspferd",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Hippopotamus amphibius"
+  },
+  {
+   "key": "kaffernbueffel",
+   "name": "Kaffernbüffel",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Syncerus caffer"
+  },
+  {
+   "key": "giraffe",
+   "name": "Giraffe",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Giraffa giraffa"
+  },
+  {
+   "key": "steppenzebra",
+   "name": "Zebra",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Equus quagga"
+  },
+  {
+   "key": "loewe_m",
+   "name": "Löwe (männlich)",
+   "group": "Löwe",
+   "negative": false,
+   "sensitive": false,
+   "latin": "Panthera leo"
+  },
+  {
+   "key": "loewin",
+   "name": "Löwin",
+   "group": "Löwe",
+   "negative": false,
+   "sensitive": false,
+   "latin": "Panthera leo"
+  },
+  {
+   "key": "leopard",
+   "name": "Leopard",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Panthera pardus"
+  },
+  {
+   "key": "gepard",
+   "name": "Gepard",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Acinonyx jubatus"
+  },
+  {
+   "key": "serval",
+   "name": "Serval",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Leptailurus serval"
+  },
+  {
+   "key": "karakal",
+   "name": "Karakal",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Caracal caracal"
+  },
+  {
+   "key": "tuepfelhyaene",
+   "name": "Tüpfelhyäne",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Crocuta crocuta"
+  },
+  {
+   "key": "wildhund",
+   "name": "Wildhund",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Lycaon pictus"
+  },
+  {
+   "key": "schabrackenschakal",
+   "name": "Schabrackenschakal",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Lupulella mesomelas"
+  },
+  {
+   "key": "loeffelhund",
+   "name": "Löffelhund",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Otocyon megalotis"
+  },
+  {
+   "key": "warzenschwein",
+   "name": "Warzenschwein",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Phacochoerus africanus"
+  },
+  {
+   "key": "impala",
+   "name": "Impala",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Aepyceros melampus"
+  },
+  {
+   "key": "streifengnu",
+   "name": "Streifengnu",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Connochaetes taurinus"
+  },
+  {
+   "key": "kudu",
+   "name": "Grosser Kudu",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Tragelaphus strepsiceros"
+  },
+  {
+   "key": "nyala",
+   "name": "Nyala",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Tragelaphus angasii"
+  },
+  {
+   "key": "buschbock",
+   "name": "Buschbock",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Tragelaphus sylvaticus"
+  },
+  {
+   "key": "elenantilope",
+   "name": "Elenantilope",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Taurotragus oryx"
+  },
+  {
+   "key": "wasserbock",
+   "name": "Wasserbock",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Kobus ellipsiprymnus"
+  },
+  {
+   "key": "rappenantilope",
+   "name": "Rappenantilope",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Hippotragus niger"
+  },
+  {
+   "key": "springbock",
+   "name": "Springbock",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Antidorcas marsupialis"
+  },
+  {
+   "key": "oryx",
+   "name": "Oryx (Spiessbock)",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Oryx gazella"
+  },
+  {
+   "key": "kuhantilope",
+   "name": "Kuhantilope",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Alcelaphus buselaphus"
+  },
+  {
+   "key": "blessbock",
+   "name": "Blessbock",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Damaliscus pygargus"
+  },
+  {
+   "key": "steinboeckchen",
+   "name": "Steinböckchen",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Raphicerus campestris"
+  },
+  {
+   "key": "kronenducker",
+   "name": "Kronenducker",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Sylvicapra grimmia"
+  },
+  {
+   "key": "klippspringer",
+   "name": "Klippspringer",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Oreotragus oreotragus"
+  },
+  {
+   "key": "baerenpavian",
+   "name": "Bärenpavian",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Papio ursinus"
+  },
+  {
+   "key": "gruenmeerkatze",
+   "name": "Grünmeerkatze",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Chlorocebus pygerythrus"
+  },
+  {
+   "key": "erdmaennchen",
+   "name": "Erdmännchen",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Suricata suricatta"
+  },
+  {
+   "key": "zebramanguste",
+   "name": "Zebramanguste",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Mungos mungo"
+  },
+  {
+   "key": "honigdachs",
+   "name": "Honigdachs",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Mellivora capensis"
+  },
+  {
+   "key": "stachelschwein",
+   "name": "Stachelschwein",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Hystrix africaeaustralis"
+  },
+  {
+   "key": "klippschliefer",
+   "name": "Klippschliefer",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Procavia capensis"
+  },
+  {
+   "key": "erdferkel",
+   "name": "Erdferkel",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Orycteropus afer"
+  },
+  {
+   "key": "seebaer",
+   "name": "Südafrikanischer Seebär",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Arctocephalus pusillus"
+  },
+  {
+   "key": "brillenpinguin",
+   "name": "Brillenpinguin",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Spheniscus demersus"
+  },
+  {
+   "key": "strauss",
+   "name": "Strauss",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Struthio camelus"
+  },
+  {
+   "key": "sekretaer",
+   "name": "Sekretär",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Sagittarius serpentarius"
+  },
+  {
+   "key": "hornrabe",
+   "name": "Südlicher Hornrabe",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Bucorvus leadbeateri"
+  },
+  {
+   "key": "gelbschnabeltoko",
+   "name": "Gelbschnabeltoko",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Tockus leucomelas"
+  },
+  {
+   "key": "riesentrappe",
+   "name": "Riesentrappe",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Ardeotis kori"
+  },
+  {
+   "key": "gaukler",
+   "name": "Gaukler",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Terathopius ecaudatus"
+  },
+  {
+   "key": "schreiseeadler",
+   "name": "Schreiseeadler",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Haliaeetus vocifer"
+  },
+  {
+   "key": "weissrueckengeier",
+   "name": "Weissrückengeier",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Gyps africanus"
+  },
+  {
+   "key": "gabelracke",
+   "name": "Gabelracke",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Coracias caudatus"
+  },
+  {
+   "key": "helmperlhuhn",
+   "name": "Helmperlhuhn",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Numida meleagris"
+  },
+  {
+   "key": "nilgans",
+   "name": "Nilgans",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Alopochen aegyptiaca"
+  },
+  {
+   "key": "hammerkopf",
+   "name": "Hammerkopf",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Scopus umbretta"
+  },
+  {
+   "key": "sattelstorch",
+   "name": "Sattelstorch",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Ephippiorhynchus senegalensis"
+  },
+  {
+   "key": "marabu",
+   "name": "Marabu",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Leptoptilos crumenifer"
+  },
+  {
+   "key": "flamingo",
+   "name": "Flamingo",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Phoenicopterus roseus"
+  },
+  {
+   "key": "nilkrokodil",
+   "name": "Nilkrokodil",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Crocodylus niloticus"
+  },
+  {
+   "key": "nilwaran",
+   "name": "Nilwaran",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Varanus niloticus"
+  },
+  {
+   "key": "pantherschildkroete",
+   "name": "Pantherschildkröte",
+   "group": null,
+   "negative": false,
+   "sensitive": false,
+   "latin": "Stigmochelys pardalis"
+  },
+  {
+   "key": "anderes_rind",
+   "name": "Hausrind",
+   "group": "Anderes",
+   "negative": true,
+   "sensitive": false,
+   "latin": null
+  },
+  {
+   "key": "anderes_ziege",
+   "name": "Hausziege",
+   "group": "Anderes",
+   "negative": true,
+   "sensitive": false,
+   "latin": null
+  },
+  {
+   "key": "anderes_hund",
+   "name": "Haushund",
+   "group": "Anderes",
+   "negative": true,
+   "sensitive": false,
+   "latin": null
+  },
+  {
+   "key": "anderes_esel",
+   "name": "Esel",
+   "group": "Anderes",
+   "negative": true,
+   "sensitive": false,
+   "latin": null
+  }
+ ]
+}
