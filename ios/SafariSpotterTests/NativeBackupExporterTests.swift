@@ -31,6 +31,7 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertEqual(try newContext.fetch(FetchDescriptor<Sighting>()).first?.id, sighting.id)
         XCTAssertEqual(try newContext.fetch(FetchDescriptor<PhotoItem>()).first?.image, photo.image)
         XCTAssertTrue(try XCTUnwrap(newContext.fetch(FetchDescriptor<PhotoItem>()).first).coarse)
+        XCTAssertEqual(try newContext.fetch(FetchDescriptor<Drive>()).first?.id, drive.id)
         let again = try WebBackupImporter.perform(url: url, context: newContext)
         XCTAssertEqual(again.sightings + again.photos + again.corrections + again.drives, 0)
     }

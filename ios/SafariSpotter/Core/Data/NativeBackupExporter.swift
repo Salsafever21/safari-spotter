@@ -29,7 +29,7 @@ enum NativeBackupExporter {
             return record
         }
         let driveRecords: [[String: Any]] = drives.map { d in
-            ["startedAt": milliseconds(d.startedAt), "endedAt": milliseconds(d.endedAt),
+            ["id": d.id.uuidString, "startedAt": milliseconds(d.startedAt), "endedAt": milliseconds(d.endedAt),
              "dist": d.dist, "sightings": d.sightings,
              "points": d.points.map(pointRecord)]
         }

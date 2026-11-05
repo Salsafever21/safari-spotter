@@ -150,7 +150,7 @@ enum WebBackupImporter {
                 drives.append(frozen)
             }
             for (index, record) in drives.enumerated() {
-                let id = stableID(origin, "drive", record["startedAt"] ?? index)
+                let id = stableID(origin, "drive", record["id"] ?? record["startedAt"] ?? index)
                 if driveIDs.contains(id) { continue }
                 guard let start = number(record["startedAt"]), let end = number(record["endedAt"]) else {
                     throw ImportError.invalid("Game Drive \(index + 1)")

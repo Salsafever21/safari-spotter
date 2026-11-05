@@ -1,14 +1,12 @@
 # Safari Spotter als native iOS-App
 
-Dieser Ordner enthält die Vorbereitung, um die Web-App (`index.html`, `app.js`) als echte iOS-App mit denselben Funktionen
-und derselben Erkennungslogik weiterzubauen: die beiden Modelle als Core ML, ein SwiftUI-Projekt mit allen Bausteinen und ein
-Prüfwerkzeug, das die Swift-Logik gegen die Web-App rechnet.
+Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
+Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand: Modelle konvertiert, Swift-Code geschrieben und auf Syntax geprüft, die reine Logik (Katalog, Artentscheidung,
-Tracker, Zusammenführung, Fahrtstatistik, Artenschutz-Vergröberung) rechnet nachweislich identisch zur Web-App
-(`Tools/logic-check`), die neuen Regeln für Bildausschnitte, Korrektur und Artenschutz sind mit `Tools/unit-check` geprüft.
-**Noch nicht geschehen:** ein Build in Xcode, die XCTests in `SafariSpotterTests/` und ein Test auf dem iPhone, weil es hier
-keinen Mac gibt. Beim ersten Build sind einzelne Compiler-Korrekturen möglich (siehe "Bekannte Lücken").
+Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 26 von 26 Simulator-Tests bestehen. Sie wurde
+auf einem iPhone 18 Pro installiert und gestartet. Der Kameratest auf dem Gerät steht aus, da iPhone-Synchronisierung das
+Kamerabild nicht an den Mac überträgt. Die Web-App kann eine vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese
+importieren sowie ihre eigenen Sichtungen, Fotos, Korrekturen, Fahrten und Einstellungen wieder exportieren und importieren.
 
 ## Bauen
 
@@ -22,7 +20,7 @@ xcodegen generate            # erzeugt SafariSpotter.xcodeproj aus project.yml
 open SafariSpotter.xcodeproj
 ```
 
-In Xcode unter *Signing & Capabilities* das eigene Team wählen (oder `DEVELOPMENT_TEAM` in `project.yml` eintragen), das
+In Xcode unter *Signing & Capabilities* bei Bedarf das Team wählen (`DEVELOPMENT_TEAM` in `project.yml` ist aktuell gesetzt), das
 iPhone anschliessen, Run. Beim ersten Start fragt die App nach der Kamera und nach dem Standort ("Beim Verwenden" genügt:
 ein gestarteter Game Drive zeichnet dank Hintergrund-Standort auch bei gesperrtem Gerät weiter, auf dem Gerät noch zu
 bestätigen), beim ersten Sichern nach "Fotos hinzufügen". Ist die Kamera verweigert, zeigt die App einen Hinweis mit Sprung in
@@ -37,6 +35,19 @@ xcodebuild -scheme SafariSpotter -destination 'platform=iOS Simulator,name=iPhon
 ```
 
 Bundle-ID: `ch.solution21.safarispotter` (in `project.yml` anpassbar).
+
+## Bestehende Daten übernehmen und neue Daten sichern
+
+In der bisherigen Web-App unter **Einstellungen → Gesamte Daten sichern** eine `.ssbackup`-Datei erzeugen und über
+**In Dateien sichern** ausserhalb der Web-App ablegen. Die Datei enthält alle Einträge dieser konkreten Browser-Installation,
+einschliesslich Original-JPEGs, Korrekturen, Fahrten und Einstellungen. Vor einem Gerätewechsel die angezeigten Zählwerte
+prüfen: Eine leere Sicherung ersetzt keine früheren Aufnahmen. Browser, Home-Screen-Apps und die native App können getrennte
+Speicher haben.
+
+In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsdatei importieren** die Datei auswählen. Der
+Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
+Import keine Duplikate an. Für spätere Sicherungen in **Einstellungen → Daten sichern** die aktuelle App-Datei vorbereiten,
+über **Sicherungsdatei teilen** in Dateien sichern und bei Bedarf über denselben Importknopf wiederherstellen.
 
 ## Was wo liegt
 
@@ -63,7 +74,7 @@ ios/
     UI/SightingsView.swift           Liste, Zählung, Karte (MapKit), Galerie, Prüfen
     UI/Sheets.swift                  Artwahl, Korrektur, Steckbrief, Game Drive live, Einstellungen, Bildanalyse
     Resources/                       species-info.json, regions.json, species-labels.json (Kopien aus data/ und Models/)
-  SafariSpotterTests/                XCTests: Bildausschnitte, Artenschutz der Fotos, Korrektur ohne Doppelsichtung
+  SafariSpotterTests/                XCTests: Bildausschnitte, Artenschutz, Korrektur, Backup und Restore
   Tools/logic-check/                 Abgleich Swift ↔ app.js (siehe unten)
   Tools/unit-check/                  Prüfungen der reinen Swift-Regeln ohne iOS-SDK (siehe unten)
 training/coreml/                     Konvertierung TF.js → Core ML (convert.py, tfjs_load.py, check_reference.js)
@@ -92,9 +103,9 @@ training/yolo/                       Vorbereitung für den eigenen Ein-Modell-De
 Alle Schwellen (Score-Minimum `max(0.12, thr*0.4)`, IoU 0,25 für Zuordnung, Glättung 0,55, Verifikation ab 0,6, Gruppenregel
 0,3, "sicher" ab 0,5) sind 1:1 übernommen.
 
-**Was auf iOS besser geht als im Browser:** Kamera und Modelle laufen ohne WebGL-Umweg (Neural Engine), die Fernerkennung mit
-3×3 Kacheln ist damit flüssig; GPS-Aufzeichnung läuft bei gesperrtem Gerät weiter (`UIBackgroundModes: location`); Fotos
-landen mit korrekten Metadaten direkt in der Mediathek; kein Service-Worker, kein Cache-Limit.
+**Native Möglichkeiten:** Vision und Core ML verwenden die iOS-Inferenzpfade; GPS-Aufzeichnung kann mit
+`UIBackgroundModes: location` auch bei gesperrtem Gerät weiterlaufen. Leistung und Zuverlässigkeit der Live-Erkennung
+müssen noch auf dem iPhone geprüft werden.
 
 ## Modelle neu erzeugen
 
