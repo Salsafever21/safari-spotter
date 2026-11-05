@@ -46,7 +46,7 @@ final class VisionPipeline {
 
     /// Detektiert in einem Ausschnitt (Pixelrechteck) des Bildes. Ergebnisse in Pixelkoordinaten des Gesamtbildes.
     func detect(in image: CIImage, region: CGRect, threshold: Double, isTile: Bool) throws -> [Detection] {
-        let crop = image.cropped(to: region).transformed(by: CGAffineTransform(translationX: -region.minX, y: -region.minY))
+        let crop = Self.crop(image, topLeft: region)
         let request = VNCoreMLRequest(model: yolo ?? detector)
         request.imageCropAndScaleOption = .scaleFill   // wie im Web: Ausschnitt auf die Modellgrösse gestaucht
         let handler = VNImageRequestHandler(ciImage: crop, orientation: .up, options: [:])
@@ -57,9 +57,7 @@ final class VisionPipeline {
             guard let top = obs.labels.first, Double(top.confidence) >= minScore, !Self.blockedCoco.contains(top.identifier) else { continue }
             // Vision: normiert, Ursprung unten links → Pixel, Ursprung oben links
             let b = obs.boundingBox
-            let box = CGRect(x: region.minX + b.minX * region.width,
-                             y: region.minY + (1 - b.maxY) * region.height,
-                             width: b.width * region.width, height: b.height * region.height)
+            let box = ImageGeometry.pixelRect(fromVision: b, region: region)
             let edge = isTile && (b.minX < 0.01 || b.minY < 0.01 || b.maxX > 0.99 || b.maxY > 0.99)
             // Kacheln sind für kleine Tiere da: grosse, angeschnittene Rahmen am Rand verwirft der Vollbild-Durchlauf besser
             if edge && (b.width > 0.5 || b.height > 0.5) { continue }
@@ -140,7 +138,7 @@ final class VisionPipeline {
 
     /// Wahrscheinlichkeiten je Klasse (in Katalogreihenfolge), Region als Vorwissen angewendet
     func classify(_ image: CIImage, square: CGRect, region: Region?) throws -> [Double] {
-        let crop = image.cropped(to: square).transformed(by: CGAffineTransform(translationX: -square.minX, y: -square.minY))
+        let crop = Self.crop(image, topLeft: square)
         let request = VNCoreMLRequest(model: classifier)
         request.imageCropAndScaleOption = .scaleFill
         try VNImageRequestHandler(ciImage: crop, orientation: .up, options: [:]).perform([request])
@@ -154,8 +152,25 @@ final class VisionPipeline {
 
     /// JPEG-Ausschnitt (224 px) für Korrekturen und Thumbnails
     func jpeg(_ image: CIImage, rect: CGRect, size: CGFloat = 224, quality: CGFloat = 0.8) -> Data? {
-        let crop = image.cropped(to: rect).transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
+        let crop = Self.crop(image, topLeft: rect)
         let scaled = crop.transformed(by: CGAffineTransform(scaleX: size / rect.width, y: size / rect.height))
         return ciContext.jpegRepresentation(of: scaled, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality])
+    }
+
+    // MARK: Bildausschnitte
+
+    /// Ausschnitt in App-Koordinaten (Pixel, Ursprung oben links), auf den Ursprung (0, 0) verschoben.
+    /// Core Image rechnet mit Ursprung unten links; ohne die Umrechnung sähen Kacheln und Artenkopf bei Tieren ausserhalb
+    /// der Bildmitte den vertikal gespiegelten Bildbereich.
+    static func crop(_ image: CIImage, topLeft r: CGRect) -> CIImage {
+        let c = ImageGeometry.ciRect(r, in: image.extent)
+        return image.cropped(to: c).transformed(by: CGAffineTransform(translationX: -c.minX, y: -c.minY))
+    }
+
+    /// Bild aus der Mediathek aufrecht gedreht (EXIF-Ausrichtung) und auf den Ursprung (0, 0) verschoben, damit die
+    /// Rahmen in denselben Koordinaten liegen wie beim Kamerabild
+    static func uprightImage(_ cg: CGImage, exifOrientation: Int32) -> CIImage {
+        let o = CIImage(cgImage: cg).oriented(forExifOrientation: exifOrientation)
+        return o.transformed(by: CGAffineTransform(translationX: -o.extent.minX, y: -o.extent.minY))
     }
 }

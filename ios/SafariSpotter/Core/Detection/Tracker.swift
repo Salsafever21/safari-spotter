@@ -41,6 +41,9 @@ final class Tracker {
     private var nextId = 1
 
     func reset() { tracks = []; }
+    func track(id: Int) -> Track? { tracks.first { $0.id == id } }
+    /// Track entfernen (Korrektur "Kein Tier"); `tracks` bleibt nach aussen nur lesbar
+    func remove(id: Int) { tracks.removeAll { $0.id == id } }
 
     func update(with detsIn: [Detection], visible: CGRect, now: TimeInterval) {
         // Höchstens drei schwache Kandidaten, sinnvoll gross

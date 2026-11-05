@@ -1,0 +1,76 @@
+import XCTest
+import CoreLocation
+@testable import SafariSpotter
+
+/// Nashorn-Standorte: Umbenennen schützt Sichtung und verknüpfte Fotos, der Export schreibt nie eine genaue Nashorn-Position
+/// und übernimmt nie GPS aus der Quelle (Befunde D2, D3)
+final class LocationProtectionTests: StoreTestCase {
+    func testCatalogMarksRhinos() {
+        XCTAssertTrue(isSensitive("Breitmaulnashorn"))
+        XCTAssertTrue(isSensitive("Spitzmaulnashorn"))
+        XCTAssertTrue(isSensitive("Nashorn"))      // Sammelname bei knapper Entscheidung
+        XCTAssertFalse(isSensitive("Elefant"))
+    }
+
+    func testRenameToRhinoCoarsensSightingAndLinkedPhotos() {
+        let s = addSighting("Elefant")
+        let linked = addPhoto(species: ["Elefant"], sightingIds: [s.id])
+        let other = addPhoto(species: ["Impala"], sightingIds: [UUID()])
+        store.rename(s, to: "Breitmaulnashorn", key: "breitmaulnashorn")
+        let c = coarsePosition
+        XCTAssertTrue(s.coarse); XCTAssertEqual(s.lat, c.lat); XCTAssertEqual(s.lon, c.lon); XCTAssertEqual(s.acc, 10000)
+        XCTAssertTrue(linked.coarse, "verknüpftes Foto muss ungenau werden")
+        XCTAssertEqual(linked.lat, c.lat); XCTAssertEqual(linked.lon, c.lon)
+        XCTAssertEqual(linked.species, ["Breitmaulnashorn"])
+        XCTAssertFalse(other.coarse, "fremdes Foto bleibt unverändert"); XCTAssertEqual(other.lat, exact.lat)
+    }
+
+    func testRenameToHarmlessSpeciesStaysExact() {
+        let s = addSighting("Elefant")
+        let p = addPhoto(species: ["Elefant"], sightingIds: [s.id])
+        store.rename(s, to: "Impala", key: "impala")
+        XCTAssertFalse(s.coarse); XCTAssertEqual(s.lat, exact.lat)
+        XCTAssertFalse(p.coarse); XCTAssertEqual(p.lat, exact.lat); XCTAssertEqual(p.species, ["Impala"])
+    }
+
+    /// `coarsen` ist beim Längengrad nicht idempotent: schon vergröberte Daten dürfen sich nicht verschieben
+    func testAlreadyCoarseDataIsNotCoarsenedTwice() {
+        let c = coarsePosition
+        let s = addSighting("Spitzmaulnashorn", position: c)
+        let p = addPhoto(species: ["Spitzmaulnashorn"], position: c, sightingIds: [s.id])
+        store.rename(s, to: "Breitmaulnashorn", key: "breitmaulnashorn")
+        XCTAssertEqual(s.lat, c.lat); XCTAssertEqual(s.lon, c.lon)
+        XCTAssertEqual(p.lat, c.lat); XCTAssertEqual(p.lon, c.lon)
+    }
+
+    func testExportCoordinate() {
+        let c = coarsePosition
+        let rhinoBox = PhotoDet(x: 0, y: 0, w: 4, h: 4, name: "Spitzmaulnashorn", conf: 0.8, sure: true)
+        let withRhinoBox = addPhoto(species: ["Impala"], dets: [rhinoBox], sightingIds: [])
+        let e = PhotoExporter.exportCoordinate(for: withRhinoBox, isSensitive: isSensitive)
+        XCTAssertEqual(e?.latitude, c.lat, "Nashorn nur als Rahmen im Bild: Export auf dem Raster"); XCTAssertEqual(e?.longitude, c.lon)
+        let harmless = addPhoto(species: ["Impala"], sightingIds: [])
+        XCTAssertEqual(PhotoExporter.exportCoordinate(for: harmless, isSensitive: isSensitive)?.latitude, exact.lat)
+        let alreadyCoarse = addPhoto(species: ["Nashorn"], position: c, sightingIds: [])
+        XCTAssertEqual(PhotoExporter.exportCoordinate(for: alreadyCoarse, isSensitive: isSensitive)?.longitude, c.lon)
+        let noGPS = addPhoto(species: ["Breitmaulnashorn"], located: false, sightingIds: [])
+        XCTAssertNil(PhotoExporter.exportCoordinate(for: noGPS, isSensitive: isSensitive))
+    }
+
+    func testJpegWithoutCoordinateRemovesSourceGPS() {
+        let src = Self.jpeg(gps: CLLocationCoordinate2D(latitude: exact.lat, longitude: exact.lon))
+        XCTAssertNotNil(PhotoExporter.gpsCoordinate(of: src), "Voraussetzung: Quelle hat GPS")
+        let out = PhotoExporter.jpegWithMetadata(src, date: .now, coordinate: nil, description: "Test")
+        XCTAssertFalse(out.isEmpty)
+        XCTAssertNil(PhotoExporter.gpsCoordinate(of: out), "GPS der Quelle darf nicht mitgehen")
+    }
+
+    func testJpegWritesProtectedCoordinateOverSourceGPS() throws {
+        let src = Self.jpeg(gps: CLLocationCoordinate2D(latitude: exact.lat, longitude: exact.lon))
+        let c = coarsePosition
+        let out = PhotoExporter.jpegWithMetadata(src, date: .now, coordinate: CLLocationCoordinate2D(latitude: c.lat, longitude: c.lon), description: "Test")
+        let got = try XCTUnwrap(PhotoExporter.gpsCoordinate(of: out))
+        XCTAssertEqual(got.latitude, c.lat, accuracy: 1e-4)
+        XCTAssertEqual(got.longitude, c.lon, accuracy: 1e-4)
+    }
+}
