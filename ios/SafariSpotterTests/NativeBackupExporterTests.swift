@@ -59,4 +59,41 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
         XCTAssertEqual(try Data(contentsOf: result.archiveURL), try Data(contentsOf: encrypted))
     }
+
+    func testEncryptedNativeArchiveRestoresPhotoSightingAndClipTogether() throws {
+        let sighting = addSighting("Elefant")
+        let photo = addPhoto(species: ["Elefant"], sightingIds: [sighting.id])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clips = root.appendingPathComponent("Clips")
+        let restoredClips = root.appendingPathComponent("RestoredClips")
+        try FileManager.default.createDirectory(at: clips, withIntermediateDirectories: true)
+        let clipID = UUID().uuidString
+        let clipBytes = Data(repeating: 49, count: 2_100_000)
+        try clipBytes.write(to: clips.appendingPathComponent("\(clipID).mov"))
+        try Data("{\"id\":\"\(clipID)\"}".utf8).write(to: clips.appendingPathComponent("\(clipID).json"))
+
+        let raw = try NativeBackupExporter.create(context: context)
+        defer { try? FileManager.default.removeItem(at: raw) }
+        let bundle = try NativeArchive.create(core: raw, clipsDirectory: clips)
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        let encrypted = try EncryptedBackup.encrypt(bundle, password: "complete backup password")
+        defer { try? FileManager.default.removeItem(at: encrypted) }
+        let decrypted = try EncryptedBackup.decrypt(encrypted, password: "complete backup password")
+        defer { try? FileManager.default.removeItem(at: decrypted) }
+        let contents = try NativeArchive.extract(decrypted)
+        defer { contents.removeTemporaryFiles() }
+        let restored = try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self,
+                                          configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let newContext = ModelContext(restored)
+        let result = try WebBackupImporter.perform(url: contents.core, context: newContext, archivedSource: encrypted)
+        defer { try? FileManager.default.removeItem(at: result.archiveURL) }
+        try NativeArchive.installClips(contents, clipsDirectory: restoredClips)
+
+        XCTAssertEqual(result.sightings, 1)
+        XCTAssertEqual(result.photos, 1)
+        XCTAssertEqual(try newContext.fetch(FetchDescriptor<PhotoItem>()).first?.image, photo.image)
+        XCTAssertEqual(try Data(contentsOf: restoredClips.appendingPathComponent("\(clipID).mov")), clipBytes)
+        XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
+    }
 }
