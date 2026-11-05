@@ -1,7 +1,7 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
@@ -68,6 +68,50 @@ const idb = {
   get(id, store = 'corrections') { return this.tx(store, 'readonly', (s) => s.get(id)).catch(() => null); },
   all(store = 'corrections') { return this.open().then((d) => new Promise((res, rej) => { const r = d.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })).catch(() => []); }
 };
+
+/* ---------- Vollständige, verlustfreie Sicherung ---------- */
+let preparedBackup = null;
+function backupStatus(message) {
+  $('#backupGateStatus').textContent = message;
+  $('#backupSettingsStatus').textContent = message;
+}
+function backupButtonText(message) {
+  $('#btnBackupGate').textContent = message;
+  $('#btnBackupSettings').textContent = message;
+}
+async function backupAction() {
+  if (preparedBackup) {
+    const file = preparedBackup.file;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Safari Spotter Datensicherung' });
+        backupStatus('Die Sicherung wurde an die gewählte App übergeben. Prüfe dort, dass die Datei vorhanden ist.');
+      } catch (e) {
+        if (e?.name !== 'AbortError') backupStatus('Teilen fehlgeschlagen. Versuche „Sicherung speichern“ erneut.');
+      }
+    } else {
+      downloadBlob(file, file.name);
+      backupStatus('Download gestartet. Prüfe die Datei im Ordner „Downloads“.');
+    }
+    return;
+  }
+  backupButtonText('Sicherung wird vorbereitet …');
+  $('#btnBackupGate').disabled = $('#btnBackupSettings').disabled = true;
+  try {
+    const snapshot = { settings, sightings, trip, trips };
+    const result = await SafariSpotterArchive.capture(snapshot, VERSION);
+    await SafariSpotterArchive.inspect(result.file);
+    preparedBackup = result;
+    const c = result.manifest.counts;
+    backupStatus(`${c.sightings} Sichtungen, ${c.photos} Fotos, ${c.corrections} Korrekturen, ${c.completedDrives} Fahrten${c.activeDrive ? ' und laufende Fahrt' : ''} geprüft. Datei: ${(result.file.size / 1048576).toFixed(1)} MB. Jetzt „Sicherung speichern“ tippen.`);
+    backupButtonText('Sicherung speichern');
+  } catch (e) {
+    backupStatus('Sicherung fehlgeschlagen: ' + (e?.message || String(e)) + '. Es wurde nichts gelöscht.');
+    backupButtonText('Erneut vorbereiten');
+  } finally { $('#btnBackupGate').disabled = $('#btnBackupSettings').disabled = false; }
+}
+$('#btnBackupGate').addEventListener('click', backupAction);
+$('#btnBackupSettings').addEventListener('click', backupAction);
 
 /* ---------- Zustand ---------- */
 const settings = Object.assign({ threshold: 0.4, labels: true, burnIn: true, far: 'on', res: '2160', region: 'auto', gps: true, collect: true, snapshots: true, autoTrack: false }, store.get('ss.settings', {}));
