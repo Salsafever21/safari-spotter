@@ -3,13 +3,15 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 27 von 27 Simulator-Tests bestehen. Build 2 wurde
+Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 28 von 28 Simulator-Tests bestehen. Build 3 wurde
 für die interne TestFlight-Gruppe freigeschaltet. Sie wurde
 auf einem iPhone 18 Pro installiert und gestartet. Der Kameratest auf dem Gerät steht aus, da iPhone-Synchronisierung das
 Kamerabild nicht an den Mac überträgt. Die Web-App kann eine vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese
 importieren sowie ihre eigenen Sichtungen, Fotos, Korrekturen, Fahrten und Einstellungen wieder exportieren und importieren.
 Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto wird vor der Tieranalyse als `PhotoItem` im
 App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
+Build 4 verhindert, dass ein verspätetes Erkennungsergebnis nach dem Ausschalten des Trackings Status oder Rahmen erneut
+einblendet. Beim Ausschalten werden die sichtbaren Treffer sofort entfernt; Ergebnisse des vorherigen Laufs werden verworfen.
 
 ## Bauen
 
@@ -175,7 +177,7 @@ Datei baut und läuft die App unverändert.
 
 ## Bekannte Lücken
 
-- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 27/27 Simulator-Tests bestanden und auf dem iPhone 18 Pro
+- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 28/28 Simulator-Tests bestanden und auf dem iPhone 18 Pro
   installiert. Die Live-Kamera konnte über iPhone-Synchronisierung nicht geprüft werden, weil Apple dort das Kamerabild sperrt.
 - **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien wurden mit dem iPhone-Build kompiliert, aber die Erkennung wurde
   noch nicht mit einer echten Kameraaufnahme auf dem iPhone geprüft. Abweichung zur Web-App

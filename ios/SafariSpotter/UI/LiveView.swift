@@ -195,7 +195,7 @@ struct OverlayView: View {
             let scale = max(geo.size.width / camera.frameSize.width, geo.size.height / camera.frameSize.height)
             let off = CGPoint(x: (camera.frameSize.width * scale - geo.size.width) / 2, y: (camera.frameSize.height * scale - geo.size.height) / 2)
             ZStack(alignment: .topLeading) {
-                ForEach(camera.tracks) { t in
+                ForEach(camera.tracking ? camera.tracks : []) { t in
                     let r = CGRect(x: t.box.minX * scale - off.x, y: t.box.minY * scale - off.y, width: t.box.width * scale, height: t.box.height * scale)
                     let color = Self.colors[t.colorIndex]
                     RoundedRectangle(cornerRadius: 10).strokeBorder(color, style: StrokeStyle(lineWidth: 2.2, dash: t.sure ? [] : [7, 5]))
@@ -206,7 +206,7 @@ struct OverlayView: View {
                         .foregroundStyle(t.sure ? Color.black : Color.white)
                         .offset(x: r.minX, y: max(0, r.minY - 30))
                 }
-                if let h = camera.hint, CACurrentMediaTime() < h.until, camera.tracks.isEmpty {
+                if camera.tracking, let h = camera.hint, CACurrentMediaTime() < h.until, camera.tracks.isEmpty {
                     Text("\(h.name)  \(Int(min(h.conf, 0.99) * 100)) %").font(.system(size: 15, weight: .semibold)).padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Self.colors[0], lineWidth: 1.5))
                         .position(x: geo.size.width / 2, y: geo.size.height * 0.62)

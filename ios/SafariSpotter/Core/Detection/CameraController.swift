@@ -59,7 +59,9 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var availableDevices: [AVCaptureDevice] = []
     private var pipeline: VisionPipeline?
     private let tracker = Tracker()
-    private var busy = false
+    private var processingTracking = false   // nur auf `queue`
+    private var processingGeneration = 0     // nur auf `queue`
+    private var displayGeneration = 0        // nur auf dem Hauptthread
     private var configured = false          // nur auf `queue`
     private var viewSize: CGSize = .zero    // nur auf `queue`: Vorschaugrösse für den sichtbaren Ausschnitt
     private var observers: [NSObjectProtocol] = []
@@ -106,10 +108,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
 
     /// Kamera anhalten (App im Hintergrund). Die Absicht "Tracken" bleibt erhalten, laufende Tracks werden verworfen.
     func stop() {
+        displayGeneration += 1
+        let generation = displayGeneration
+        tracks = []; hint = nil
+        status = tracking ? "Suche Tiere …" : "Tracken aus"
         queue.async {
             if self.session.isRunning { self.session.stopRunning() }
             self.tracker.reset(); self.hintRuns = []
-            DispatchQueue.main.async { self.tracks = []; self.hint = nil }
+            self.processingGeneration = generation
         }
     }
 
@@ -216,7 +222,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     func selectLens(_ id: String) {
+        guard id != selectedLensID else { return }
+        displayGeneration += 1
+        let generation = displayGeneration
+        tracks = []; hint = nil
+        status = tracking ? "Suche Tiere …" : "Tracken aus"
         queue.async {
+            self.processingGeneration = generation
+            self.tracker.reset()
             guard self.configured, let next = self.availableDevices.first(where: { $0.uniqueID == id }),
                   next.uniqueID != self.device?.uniqueID,
                   let newInput = try? AVCaptureDeviceInput(device: next),
@@ -233,7 +246,6 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             if let c = self.output.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
             if let c = self.photoOutput.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
             self.session.commitConfiguration()
-            self.tracker.reset()
             let active = self.device
             DispatchQueue.main.async {
                 self.tracks = []
@@ -280,15 +292,23 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     func setTracking(_ on: Bool) {
+        displayGeneration += 1
+        let generation = displayGeneration
         tracking = on
-        if !on { queue.async { self.tracker.reset() }; tracks = []; hint = nil; status = "Tracken aus" } else { status = "Suche Tiere …" }
+        tracks = []; hint = nil; fps = 0
+        status = on ? "Suche Tiere …" : "Tracken aus"
+        queue.async {
+            self.processingTracking = on
+            self.processingGeneration = generation
+            self.tracker.reset(); self.hintRuns = []
+        }
     }
 
     // MARK: Erkennungsschleife (ein Frame nach dem anderen, nie überlappend)
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard tracking, !busy, let pipeline, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        busy = true
+        guard processingTracking, let pipeline, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let generation = processingGeneration
         let t0 = CACurrentMediaTime()
         let image = CIImage(cvPixelBuffer: pb)
         let size = image.extent.size
@@ -309,9 +329,9 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                 let probs = try pipeline.classify(image, square: sq, region: region)
                 let d = tracker.apply(probs: probs, to: cand, catalog: catalog, now: now)
                 if d.sure { maybeLog(cand, image: image, size: size) }
-                collectForReview(cand, decision: d, image: image, square: sq, region: region)
+                collectForReview(cand, decision: d, image: image, square: sq, region: region, generation: generation)
             }
-            try idleHint(image: image, size: size, region: region, now: now)
+            try idleHint(image: image, size: size, region: region, now: now, generation: generation)
         } catch { DispatchQueue.main.async { self.lastError = error.localizedDescription } }
         let dt = CACurrentMediaTime() - t0
         let snap = tracker.tracks.filter { $0.isShown }.map { t in
@@ -319,17 +339,22 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                           sub: t.decision.other ? "kein Safari-Tier" : t.locked ? "bestätigt" : t.decision.name != nil ? "\(Int(min(t.decision.confidence, 0.99) * 100)) %" : "unbestimmt",
                           sure: t.decision.sure, colorIndex: t.colorIndex)
         }
-        DispatchQueue.main.async {
-            self.frameSize = size; self.tracks = snap; self.fps = self.fps * 0.8 + (1 / max(dt, 0.001)) * 0.2
-            let n = snap.count
-            if n == 0, let h = self.hint, CACurrentMediaTime() < h.until { self.status = "\(h.name) vermutet" }
-            else { self.status = n == 0 ? "Suche Tiere …" : n == 1 ? "1 Tier im Bild" : "\(n) Tiere im Bild" }
-            self.busy = false
-        }
+        DispatchQueue.main.async { self.publishFrame(snap, size: size, elapsed: dt, generation: generation) }
     }
 
+    /// Ergebnisse eines bereits beendeten Tracking-Durchlaufs dürfen die ausgeschaltete Anzeige nicht neu befüllen.
+    func publishFrame(_ snapshots: [TrackSnapshot], size: CGSize, elapsed: TimeInterval, generation: Int) {
+        guard tracking, generation == displayGeneration else { return }
+        frameSize = size; tracks = snapshots; fps = fps * 0.8 + (1 / max(elapsed, 0.001)) * 0.2
+        let n = snapshots.count
+        if n == 0, let hint, CACurrentMediaTime() < hint.until { status = "\(hint.name) vermutet" }
+        else { status = n == 0 ? "Suche Tiere …" : n == 1 ? "1 Tier im Bild" : "\(n) Tiere im Bild" }
+    }
+
+    var currentDisplayGeneration: Int { displayGeneration }
+
     /// Hinweis ohne Rahmen: Bildmitte prüfen, wenn der Detektor nichts findet (Krokodil, Schildkröte, Waran)
-    private func idleHint(image: CIImage, size: CGSize, region: Region?, now: TimeInterval) throws {
+    private func idleHint(image: CIImage, size: CGSize, region: Region?, now: TimeInterval, generation: Int) throws {
         guard let pipeline else { return }
         if tracker.tracks.contains(where: { $0.isShown && $0.missed == 0 }) { hintRuns = []; return }
         if now - lastHintAt < 0.7 { return }
@@ -340,11 +365,13 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         hintRuns.append(d); if hintRuns.count > 4 { hintRuns.removeFirst() }
         let same = d.name == nil ? 0 : hintRuns.filter { $0.name == d.name && !$0.other && $0.confidence >= 0.6 }.count
         if same >= 2, !d.other, let name = d.name {
-            DispatchQueue.main.async { self.hint = (name, d.confidence, now + 1.8) }
+            DispatchQueue.main.async {
+                if self.tracking && generation == self.displayGeneration { self.hint = (name, d.confidence, now + 1.8) }
+            }
             if same >= 4, d.confidence >= 0.7, !(lastHintLog.name == name && now - lastHintLog.t < 60) {
                 lastHintLog = (name, now)
                 let thumb = pipeline.jpeg(image, rect: sq, size: 96, quality: 0.6)
-                log(name: name, key: d.key, thumb: thumb, src: "hint", image: image, size: size)
+                log(name: name, key: d.key, thumb: thumb, src: "hint", image: image, size: size, generation: generation)
             }
         }
     }
@@ -355,22 +382,23 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         guard !t.logged, let name = t.decision.name, t.decision.sure, !t.decision.other, t.hits >= 4, CACurrentMediaTime() - t.born >= 1.2, let pipeline else { return }
         t.logged = true
         let thumb = pipeline.jpeg(image, rect: VisionPipeline.cropSquare(t.box, in: size, pad: 0.08), size: 96, quality: 0.6)
-        t.sightingId = log(name: name, key: t.decision.key, thumb: thumb, src: "cam", image: image, size: size)
+        t.sightingId = log(name: name, key: t.decision.key, thumb: thumb, src: "cam", image: image, size: size, generation: processingGeneration)
     }
 
     /// Loggt eine Sichtung (fasst gleiche Art innert 30 s zusammen) und speichert bei neuen Einträgen einen Schnappschuss
     @discardableResult
-    func log(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int = 1, noMerge: Bool = false) -> UUID? {
-        if Thread.isMainThread { return logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge) }
+    func log(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int = 1, noMerge: Bool = false, generation: Int? = nil) -> UUID? {
+        if Thread.isMainThread { return logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge, generation: generation) }
         var result: UUID?
         let sem = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async { result = self.logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge); sem.signal() }
+        DispatchQueue.main.async { result = self.logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge, generation: generation); sem.signal() }
         sem.wait()
         return result
     }
 
     @discardableResult
-    private func logOnMain(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int, noMerge: Bool) -> UUID? {
+    private func logOnMain(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int, noMerge: Bool, generation: Int? = nil) -> UUID? {
+        if let generation, (!tracking || generation != displayGeneration) { return nil }
         guard let ctx = self.modelContext else { return nil }
         if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30,
            let existing = SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) {
@@ -404,10 +432,11 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     /// Unsichere, stabile Treffer in die Prüfliste (30 bis 70 %)
-    private func collectForReview(_ t: Track, decision d: SpeciesDecision, image: CIImage, square: CGRect, region: Region?) {
+    private func collectForReview(_ t: Track, decision d: SpeciesDecision, image: CIImage, square: CGRect, region: Region?, generation: Int) {
         guard settings.collect, !t.collected, t.hits >= 4, let name = d.name, !d.other, d.confidence >= 0.3, d.confidence < 0.7, let pipeline, let jpeg = pipeline.jpeg(image, rect: square) else { return }
         t.collected = true
         DispatchQueue.main.async {
+            guard self.tracking, generation == self.displayGeneration else { return }
             guard let ctx = self.modelContext else { return }
             ctx.insert(Correction(image: jpeg, predicted: name, predKey: d.key, conf: d.confidence, status: "review", region: region?.key)); try? ctx.save()
         }
