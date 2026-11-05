@@ -120,9 +120,12 @@ struct DriveLiveView: View {
 /// Einstellungen
 struct SettingsView: View {
     @ObservedObject var camera: CameraController
+    @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var catalog: SpeciesCatalog
     @EnvironmentObject private var drive: DriveRecorder
+    @State private var choosingBackup = false
+    @State private var backupMessage: String?
     var body: some View {
         NavigationStack {
             Form {
@@ -137,8 +140,24 @@ struct SettingsView: View {
                     Toggle("Unsichere Treffer sammeln", isOn: $settings.collect)
                 }
                 Section("Kamera") { Picker("Auflösung", selection: $settings.res) { Text("HD 720p").tag("720"); Text("Full HD 1080p").tag("1080"); Text("4K 2160p").tag("2160") }; Text("Gilt ab dem nächsten App-Start.").font(.caption).foregroundStyle(.secondary) }
+                Section("Bisherige Web-App-Daten") {
+                    Button("Sicherungsdatei importieren") { choosingBackup = true }
+                    if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
+                    Text("Die Originaldatei bleibt in der App erhalten. Ein erneuter Import legt keine doppelten Einträge an.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
+                .fileImporter(isPresented: $choosingBackup, allowedContentTypes: [.item]) { result in
+                    switch result {
+                    case .failure(let error): backupMessage = "Datei konnte nicht geöffnet werden: \(error.localizedDescription)"
+                    case .success(let url):
+                        do {
+                            let report = try WebBackupImporter.perform(url: url, context: context)
+                            backupMessage = "Importiert: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten. Original gesichert."
+                        } catch { backupMessage = error.localizedDescription }
+                    }
+                }
         }
     }
 }

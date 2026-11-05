@@ -369,6 +369,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
         Bilder aus der Mediathek analysieren
         <input type="file" id="fileGate" accept="image/*" multiple hidden>
       </label>
+      <button class="prim sec" id="btnBackupGate" type="button">Gesamte Daten sichern</button>
+      <p class="small" id="backupGateStatus">Sichert Sichtungen, Fotos, Korrekturen und Game Drives in einer Datei. Die Sicherung enthält genaue GPS-Daten; speichere sie an einem geschützten Ort.</p>
 
       <div class="card">
         <h2 id="speciesTitle">Erkennt zuverlässig</h2>
@@ -563,6 +565,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <button type="button" id="btnReload">Modelle neu laden</button>
       <button type="button" id="btnStopCam">Kamera beenden</button>
     </div>
+    <div class="actions"><button type="button" class="main" id="btnBackupSettings">Gesamte Daten sichern</button></div>
+    <p class="small" id="backupSettingsStatus">Sichert Sichtungen, Fotos, Korrekturen und Game Drives. Die Datei enthält genaue GPS-Daten.</p>
     <p class="version">Safari Spotter <span id="ver"></span> · Backend <span id="backend">?</span> · <span id="gpsState">GPS aus</span> · <span id="camRes">Kamera aus</span></p>
   </section>
 
@@ -638,6 +642,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 <script src="vendor/coco-ssd.min.js"></script>
 <script src="vendor/mobilenet.min.js"></script>
 <script src="vendor/leaflet.js"></script>
+<script src="backup.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
