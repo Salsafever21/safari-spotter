@@ -221,7 +221,9 @@ struct SettingsView: View {
                 let raw = try NativeBackupExporter.create(context: context, drive: drive)
                 defer { try? FileManager.default.removeItem(at: raw) }
                 let protected = try await Task.detached(priority: .userInitiated) {
-                    try EncryptedBackup.encrypt(raw, password: password)
+                    let bundle = try NativeArchive.create(core: raw, clipsDirectory: NativeArchive.clipsDirectory())
+                    defer { try? FileManager.default.removeItem(at: bundle) }
+                    return try EncryptedBackup.encrypt(bundle, password: password)
                 }.value
                 nativeBackupURL = protected
                 backupMessage = "Verschlüsselte Sicherung bereit. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
@@ -264,8 +266,22 @@ struct SettingsView: View {
                     try EncryptedBackup.decrypt(encrypted, password: password)
                 }.value
                 defer { try? FileManager.default.removeItem(at: decrypted) }
-                let report = try WebBackupImporter.perform(url: decrypted, context: context, archivedSource: encrypted)
-                backupMessage = "Wiederhergestellt: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten."
+                let native = try NativeArchive.isNative(decrypted)
+                let extracted = native ? try await Task.detached(priority: .userInitiated) {
+                    try NativeArchive.extract(decrypted)
+                }.value : nil
+                defer { extracted?.removeTemporaryFiles() }
+                let clipDirectory = try NativeArchive.clipsDirectory()
+                if let extracted { try NativeArchive.checkClipCollisions(extracted, clipsDirectory: clipDirectory) }
+                let report = try WebBackupImporter.perform(url: extracted?.core ?? decrypted,
+                                                           context: context, archivedSource: encrypted)
+                if let extracted {
+                    try await Task.detached(priority: .userInitiated) {
+                        try NativeArchive.installClips(extracted, clipsDirectory: clipDirectory)
+                    }.value
+                }
+                let clipCount = extracted?.clips.filter { $0.pathExtension == "mov" }.count ?? 0
+                backupMessage = "Wiederhergestellt: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen, \(report.drives) Fahrten und \(clipCount) Videos."
                 importedArchives = WebBackupImporter.archivedFiles()
                 try? FileManager.default.removeItem(at: encrypted)
                 pendingEncryptedURL = nil

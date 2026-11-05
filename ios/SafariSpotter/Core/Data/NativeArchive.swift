@@ -35,6 +35,12 @@ enum NativeArchive {
     private static let bufferSize = 1_048_576
     private static let maxFileSize: UInt64 = 20_000_000_000
 
+    static func clipsDirectory() throws -> URL {
+        try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: true)
+            .appendingPathComponent("Clips", isDirectory: true)
+    }
+
     static func isNative(_ url: URL) throws -> Bool {
         let input = try FileHandle(forReadingFrom: url)
         defer { try? input.close() }
