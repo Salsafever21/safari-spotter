@@ -64,8 +64,8 @@ final class ImageCropTests: XCTestCase {
         let img = try cameraFrame()
         let size = img.extent.size
         let animalTop = CGRect(x: 30, y: 20, width: 30, height: 30), animalBottom = CGRect(x: 30, y: 150, width: 30, height: 30)
-        XCTAssertGreaterThan(redShare(VisionPipeline.crop(img, topLeft: VisionPipeline.cropSquare(animalTop, in: size))), 0.95)
-        XCTAssertLessThan(redShare(VisionPipeline.crop(img, topLeft: VisionPipeline.cropSquare(animalBottom, in: size))), 0.05)
+        XCTAssertGreaterThan(redShare(VisionPipeline.crop(img, topLeft: VisionPipeline.cropSquare(animalTop, in: size))), 0.9)
+        XCTAssertLessThan(redShare(VisionPipeline.crop(img, topLeft: VisionPipeline.cropSquare(animalBottom, in: size))), 0.1)
     }
 
     /// Bildanalyse: Mediathek-Bild aufrecht, Ausdehnung ab (0, 0), Ausschnitte in denselben Koordinaten

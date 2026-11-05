@@ -3,6 +3,7 @@ import SwiftData
 import PhotosUI
 import CoreImage
 import MapKit
+import Combine
 
 /// Artenwahl (Korrektur, manueller Eintrag, Prüfliste)
 struct SpeciesPicker: View {

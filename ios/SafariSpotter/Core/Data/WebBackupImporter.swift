@@ -22,10 +22,8 @@ enum WebBackupImporter {
     }
 
     static func perform(url: URL, context: ModelContext) throws -> Result {
-        guard url.startAccessingSecurityScopedResource() else {
-            throw ImportError.invalid("Datei konnte nicht geöffnet werden")
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
         guard bytes.count >= 14, String(data: bytes.prefix(6), encoding: .utf8) == "SSBK1\n" else {
             throw ImportError.invalid("Dateikopf")
@@ -79,6 +77,12 @@ enum WebBackupImporter {
         if !FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.copyItem(at: url, to: destination) }
 
         let origin = manifest["origin"] as? String ?? "unknown"
+        var sightingNames: [UUID: String] = [:]
+        for record in webSightings {
+            if let key = record["id"], let name = record["s"] as? String {
+                sightingNames[stableID(origin, "sighting", key)] = name
+            }
+        }
         let sightingIDs = Set(try context.fetch(FetchDescriptor<Sighting>()).map(\.id))
         let photoIDs = Set(try context.fetch(FetchDescriptor<PhotoItem>()).map(\.id))
         let correctionIDs = Set(try context.fetch(FetchDescriptor<Correction>()).map(\.id))
@@ -105,7 +109,10 @@ enum WebBackupImporter {
                 let id = stableID(origin, "photo", record["id"] ?? index)
                 if photoIDs.contains(id) { continue }
                 let species = record["species"] as? [String] ?? []
+                let ids = (record["sightIds"] as? [Any] ?? []).map { stableID(origin, "sighting", $0) }
                 let sensitivePhoto = species.contains(where: sensitive)
+                    || ids.contains { sightingNames[$0].map(sensitive) ?? false }
+                    || (record["dets"] as? [[String: Any]] ?? []).contains { ($0["name"] as? String).map(sensitive) ?? false }
                 let image = bytes[(binaryStart + offset)..<(binaryStart + offset + length)]
                 let dets = (record["dets"] as? [[String: Any]] ?? []).compactMap { det -> PhotoDet? in
                     guard let box = det["box"] as? [Any], box.count == 4,
@@ -114,7 +121,6 @@ enum WebBackupImporter {
                     return PhotoDet(x: x, y: y, w: w, h: h, name: det["name"] as? String,
                                     conf: number(det["conf"]) ?? 0, sure: det["sure"] as? Bool ?? false)
                 }
-                let ids = (record["sightIds"] as? [Any] ?? []).map { stableID(origin, "sighting", $0) }
                 let item = PhotoItem(t: Date(timeIntervalSince1970: ms / 1000),
                                      kind: record["kind"] as? String ?? "auto", species: species, dets: dets,
                                      image: Data(image), thumb: imageData(record["thumb"]),
@@ -144,7 +150,7 @@ enum WebBackupImporter {
                 drives.append(frozen)
             }
             for (index, record) in drives.enumerated() {
-                let id = stableID(origin, "drive", "\(record["startedAt"] ?? index)-\(record["endedAt"] ?? "active")")
+                let id = stableID(origin, "drive", record["startedAt"] ?? index)
                 if driveIDs.contains(id) { continue }
                 guard let start = number(record["startedAt"]), let end = number(record["endedAt"]) else {
                     throw ImportError.invalid("Game Drive \(index + 1)")
@@ -175,7 +181,7 @@ enum WebBackupImporter {
     private static func sensitive(_ name: String) -> Bool { name.localizedCaseInsensitiveContains("nashorn") || name.lowercased().contains("rhino") }
     private static func position(_ value: [String: Any], sensitive: Bool) -> Position? {
         guard let lat = number(value["lat"]), let lon = number(value["lon"]) else { return nil }
-        if sensitive { return Position.coarsen(lat: lat, lon: lon) }
+        if sensitive && value["coarse"] as? Bool != true { return Position.coarsen(lat: lat, lon: lon) }
         return Position(lat: lat, lon: lon, acc: number(value["acc"]) ?? 0, coarse: value["coarse"] as? Bool ?? false)
     }
     private static func imageData(_ value: Any?) -> Data? {
