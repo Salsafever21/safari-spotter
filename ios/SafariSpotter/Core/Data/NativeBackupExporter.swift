@@ -68,7 +68,8 @@ enum NativeBackupExporter {
             "trip": activeDrive(drive),
             "settings": ["threshold": settings.threshold, "labels": settings.labels, "far": settings.far,
                          "region": settings.region, "gps": settings.gps, "collect": settings.collect,
-                         "snapshots": settings.snapshots, "autoTrack": settings.autoTrack, "res": settings.res]
+                         "snapshots": settings.snapshots, "autoTrack": settings.autoTrack, "res": settings.res,
+                         "lensID": settings.lensID, "burnIn": settings.burnIn]
         ]
         let manifest: [String: Any] = [
             "format": "safari-spotter-backup", "version": 1,

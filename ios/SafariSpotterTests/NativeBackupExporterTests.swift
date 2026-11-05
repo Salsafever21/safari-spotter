@@ -4,6 +4,24 @@ import SwiftData
 
 @MainActor
 final class NativeBackupExporterTests: StoreTestCase {
+    func testCameraSettingsSurviveNativeBackup() throws {
+        let settings = AppSettings.shared
+        let originalLens = settings.lensID, originalBurnIn = settings.burnIn
+        defer { settings.lensID = originalLens; settings.burnIn = originalBurnIn }
+        settings.lensID = "lens-from-backup"
+        settings.burnIn = false
+        let raw = try NativeBackupExporter.create(context: context)
+        defer { try? FileManager.default.removeItem(at: raw) }
+        settings.lensID = ""
+        settings.burnIn = true
+        let restored = try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self,
+                                          configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let result = try WebBackupImporter.perform(url: raw, context: ModelContext(restored))
+        defer { try? FileManager.default.removeItem(at: result.archiveURL) }
+        XCTAssertEqual(settings.lensID, "lens-from-backup")
+        XCTAssertFalse(settings.burnIn)
+    }
+
     func testNativeBackupRestoresDataAndCanBeImportedTwice() throws {
         let sighting = addSighting("Breitmaulnashorn", position: coarsePosition)
         let photo = addPhoto(species: ["Breitmaulnashorn"], position: coarsePosition,

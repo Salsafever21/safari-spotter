@@ -242,5 +242,7 @@ enum WebBackupImporter {
         if let v = value["snapshots"] as? Bool { settings.snapshots = v }
         if let v = value["autoTrack"] as? Bool { settings.autoTrack = v }
         if let v = value["res"] as? String { settings.res = v }
+        if let v = value["lensID"] as? String { settings.lensID = v }
+        if let v = value["burnIn"] as? Bool { settings.burnIn = v }
     }
 }
