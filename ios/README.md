@@ -110,7 +110,10 @@ python convert.py --check            # --skip-detector, wenn nur der Kopf neu is
 
 `convert.py` liest die TF.js-Graphen direkt (eigener Loader in `tfjs_load.py`, weil der offizielle Konverter mit den Modellen
 nicht umgehen kann), setzt MobileNetV2 und Kopf zu **einem** Vision-Classifier zusammen und baut den Detektor als Pipeline
-(SSDLite → Core-ML-NMS, IoU 0,5, Confidence 0,25, klassenübergreifend wie im Web). Die `HEAD`-Konstante in `convert.py` zeigt
+(SSDLite → Core-ML-NMS, klassenübergreifend wie im Web). Die NMS-Schwellen sind fest verdrahtet (IoU 0,5, Score 0,12 =
+Untergrenze von `minScore`; den eigentlichen Score-Filter macht `VisionPipeline.detect`), der Detektor hat als einzige
+Eingabe das Bild: optionale Schwellen-Eingaben am NMS-Modell lehnt `coremlc` ab ("Features cannot be optional to this type
+of model"). Die `HEAD`-Konstante in `convert.py` zeigt
 auf die Kopfversion. `--check` vergleicht die TensorFlow-Funktion vor der Konvertierung mit TF.js (maximale Abweichung
 1,2e-07); die gespeicherten Core-ML-Dateien selbst sind damit noch nicht gegen TF.js geprüft (das geht nur auf einem Mac
 bzw. iPhone). Danach `species-labels.json` nach `SafariSpotter/Resources/` kopieren.
@@ -158,9 +161,9 @@ Datei baut und läuft die App unverändert.
 - **Nicht kompiliert**: Der Code wurde ohne Xcode geschrieben. Syntax, die Foundation-Logik und die reinen Regeln sind
   geprüft, Aufrufe in AVFoundation, Vision, SwiftData, MapKit, ImageIO und PhotosUI nicht; die XCTests dafür liegen bereit.
   Rechne beim ersten Build mit einzelnen kleinen Korrekturen.
-- **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien sind noch nie auf einem iPhone gelaufen.
-  Falls Vision beim Detektor die optionalen Eingaben `iouThreshold`/`confidenceThreshold` nicht mag, lassen sie sich in
-  `convert.py` entfernen (fest verdrahtete Werte in der NMS-Schicht).
+- **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien sind noch nie auf einem iPhone gelaufen. Abweichung zur Web-App
+  bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
+  IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
 - **Videoaufnahme mit eingebranntem Overlay** fehlt noch. Im Web zeichnet ein Canvas Rahmen ins Video; nativ braucht das einen
   `AVAssetWriter` mit einem Overlay-Layer (`AVVideoCompositionCoreAnimationTool`) oder das Mitschneiden der gerenderten
   Vorschau. Der Audio-Teil (Mikrofon-Recht) ist in `project.yml` schon angelegt.
