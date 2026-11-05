@@ -143,6 +143,11 @@ struct SettingsView: View {
                     Toggle("Unsichere Treffer sammeln", isOn: $settings.collect)
                 }
                 Section("Kamera") { Picker("Auflösung", selection: $settings.res) { Text("HD 720p").tag("720"); Text("Full HD 1080p").tag("1080"); Text("4K 2160p").tag("2160") }; Text("Gilt ab dem nächsten App-Start.").font(.caption).foregroundStyle(.secondary) }
+                Section("Video") {
+                    Toggle("Rahmen ins Video einbrennen", isOn: $settings.burnIn).disabled(camera.recording)
+                    Text("Videos werden höchstens in Full HD und ohne Ton gespeichert. Die Datei enthält keinen Standort; in der App und beim Sichern in Fotos gilt nur die 10-km-Zelle. Galerie → Videos zum Ansehen und Teilen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Bisherige Web-App-Daten") {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
                     if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }

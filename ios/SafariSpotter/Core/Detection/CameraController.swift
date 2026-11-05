@@ -48,10 +48,19 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     @Published var selectedLensID = ""
     @Published var capturingPhoto = false
     @Published private(set) var previewSize: CGSize = .zero   // Grösse der Vorschau auf dem Bildschirm (Hauptthread)
+    @Published private(set) var recording = false            // Videoaufnahme läuft (Hauptthread)
+    @Published private(set) var recordingStartedAt: Date?
+    @Published var notice: String?                            // kurze Meldung, z. B. "Video gespeichert"
+    private(set) var activeClipID: UUID?                      // laufender Clip, von der Wiederherstellung ausgenommen
 
     struct TrackSnapshot: Identifiable { let id: Int; let box: CGRect; let name: String; let sub: String; let sure: Bool; let colorIndex: Int }
 
+    /// Erkennung, Session-Konfiguration, Tracker (bisheriger Kamera-Thread)
     private let queue = DispatchQueue(label: "ch.solution21.safarispotter.camera", qos: .userInitiated)
+    /// Bildlieferung der Kamera: gibt jedes Bild sofort an die Aufnahme und nur bei freier Erkennung an `queue` weiter
+    private let frameQueue = DispatchQueue(label: "ch.solution21.safarispotter.frames", qos: .userInitiated)
+    private let detectionGate = DetectionGate()
+    let recorder = VideoRecorder()
     private let output = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
     private var photoHandler: PhotoCaptureHandler?
@@ -79,6 +88,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     override init() {
         super.init()
         observeSession()
+        recorder.isSensitive = { [catalog = self.catalog] in catalog.isSensitive(name: $0) }
+        recorder.onAutoStop = { [weak self] reason in self?.stopRecording(reason: reason) }
     }
 
     deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
@@ -107,7 +118,9 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     /// Kamera anhalten (App im Hintergrund). Die Absicht "Tracken" bleibt erhalten, laufende Tracks werden verworfen.
+    /// Eine laufende Videoaufnahme wird zuerst sauber abgeschlossen (mit Hintergrundzeit für das Fertigschreiben).
     func stop() {
+        if recording { stopRecording(reason: .background) }
         displayGeneration += 1
         let generation = displayGeneration
         tracks = []; hint = nil
@@ -133,6 +146,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             guard let self else { return }
             let err = n.userInfo?[AVCaptureSessionErrorKey] as? Error
             self.lastError = "Kamera-Fehler: \(err?.localizedDescription ?? "unbekannt")"
+            self.stopRecording(reason: .failed(err?.localizedDescription ?? "Kamera-Fehler"))
             // z. B. nach einem Neustart der Mediendienste: Session neu starten, solange die App aktiv ist
             if UIApplication.shared.applicationState == .active {
                 self.queue.async { if self.configured && !self.session.isRunning { self.session.startRunning() } }
@@ -140,6 +154,12 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         })
         observers.append(nc.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: .main) { [weak self] _ in
             self?.status = "Kamera unterbrochen"
+            // Anruf, Multitasking, andere App mit Kamera: bisherige Aufnahme sauber abschliessen
+            self?.stopRecording(reason: .interrupted)
+        })
+        observers.append(nc.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.recording, ProcessInfo.processInfo.thermalState == .critical else { return }
+            self.stopRecording(reason: .thermal)
         })
         observers.append(nc.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -178,8 +198,10 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         session.sessionPreset = session.canSetSessionPreset(preset) ? preset : .high
         if !session.outputs.contains(output) {
             output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-            output.alwaysDiscardsLateVideoFrames = true
-            output.setSampleBufferDelegate(self, queue: queue)
+            // Die Bildlieferung kehrt sofort zurück (Aufnahme auf eigener Queue, Erkennung nur bei freiem Tor), darum keine
+            // verspäteten Bilder verwerfen: sonst gingen bei einer Aufnahme Bilder verloren
+            output.alwaysDiscardsLateVideoFrames = false
+            output.setSampleBufferDelegate(self, queue: frameQueue)
             guard session.canAddOutput(output) else { DispatchQueue.main.async { self.lastError = "Kamerabild nicht verfügbar" }; return }
             session.addOutput(output)
         }
@@ -222,7 +244,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     func selectLens(_ id: String) {
-        guard id != selectedLensID else { return }
+        // Während einer Videoaufnahme kein Objektivwechsel (Bildgrösse und Bildausschnitt des Clips bleiben fest)
+        guard id != selectedLensID, !recording else { return }
         displayGeneration += 1
         let generation = displayGeneration
         tracks = []; hint = nil
@@ -291,12 +314,93 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         }
     }
 
+    // MARK: Videoaufnahme (Hauptthread)
+
+    func toggleRecording() {
+        if recording { stopRecording(reason: .user) } else { startRecording() }
+    }
+
+    /// Startet eine Aufnahme, mit oder ohne laufende Erkennung. Prüft Recht und freien Speicher; der Clip bekommt höchstens
+    /// die vergröberte 10-km-Position (die Videodatei selbst gar keinen Ort).
+    func startRecording() {
+        guard !recording else { return }
+        guard permission == .granted else { lastError = "Für Videos braucht Safari Spotter die Kamera."; return }
+        let directory: URL
+        do { directory = try ClipFiles.defaultDirectory() }
+        catch { lastError = "Videoordner nicht verfügbar: \(error.localizedDescription)"; return }
+        guard ClipFiles.hasRoom(available: ClipFiles.availableCapacity(at: directory), minimum: ClipFiles.minimumFreeToStart) else {
+            lastError = "Zu wenig freier Speicher für ein Video (mindestens 1 GB)."; return
+        }
+        let position = drive.lastFix.flatMap { fix in
+            Date().timeIntervalSince(fix.timestamp) < 180 ? Position.coarsen(lat: fix.coordinate.latitude, lon: fix.coordinate.longitude) : nil
+        }
+        let now = Date()
+        let info = VideoRecorder.StartInfo(createdAt: now, directory: directory, burnIn: settings.burnIn, labels: settings.labels,
+                                           position: position, lens: lenses.first { $0.id == selectedLensID }?.name,
+                                           trackingActive: tracking,
+                                           stamp: settings.burnIn ? "Safari Spotter · \(fmtDate(now)) \(fmtTime(now))" : nil)
+        activeClipID = info.id
+        recorder.start(info)
+        recording = true
+        recordingStartedAt = now
+        setLensSwitchingLocked(true)
+    }
+
+    /// Beendet die Aufnahme und schreibt den Clip fertig, auch wenn die App gerade in den Hintergrund geht
+    func stopRecording(reason: VideoRecorder.StopReason) {
+        guard recording else { return }
+        recording = false
+        recordingStartedAt = nil
+        let task = BackgroundTask.begin("Safari Spotter Video")
+        recorder.stop(reason: reason) { [weak self] result in
+            defer { task.end() }
+            guard let self else { return }
+            self.activeClipID = nil
+            ClipLibrary.shared.reload()
+            switch result {
+            case .success(let clip?):
+                let base = clip.state == .complete ? "Video gespeichert · \(VideoGeometry.timerText(clip.duration))" : "Video unvollständig gespeichert"
+                self.notice = Self.stopNotice(base, reason: reason)
+            case .success(nil):
+                self.notice = "Keine Videobilder aufgenommen"
+            case .failure(let error):
+                self.lastError = error.localizedDescription
+            }
+        }
+        setLensSwitchingLocked(false)
+    }
+
+    static func stopNotice(_ base: String, reason: VideoRecorder.StopReason) -> String {
+        switch reason {
+        case .user, .background: return base
+        case .interrupted: return base + " (Kamera unterbrochen)"
+        case .thermal: return base + " (iPhone zu heiss)"
+        case .lowStorage: return base + " (Speicher fast voll)"
+        case .failed(let message): return base + " (\(message))"
+        }
+    }
+
+    /// Beim virtuellen Mehrfachobjektiv ("Automatisch") schaltet iOS selbst zwischen den Objektiven um; während einer
+    /// Aufnahme wird das gesperrt, der Zoom bleibt dann digital auf dem aktuellen Objektiv
+    private func setLensSwitchingLocked(_ locked: Bool) {
+        queue.async {
+            guard let d = self.device, d.isVirtualDevice, d.primaryConstituentDeviceSwitchingBehavior != .unsupported else { return }
+            do {
+                try d.lockForConfiguration()
+                d.setPrimaryConstituentDeviceSwitchingBehavior(locked ? .locked : .auto, restrictedSwitchingBehaviorConditions: [])
+                d.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
     func setTracking(_ on: Bool) {
         displayGeneration += 1
         let generation = displayGeneration
         tracking = on
         tracks = []; hint = nil; fps = 0
         status = on ? "Suche Tiere …" : "Tracken aus"
+        detectionGate.setWanted(on)
+        if !on { recorder.clearOverlay() }
         queue.async {
             self.processingTracking = on
             self.processingGeneration = generation
@@ -304,9 +408,22 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         }
     }
 
-    // MARK: Erkennungsschleife (ein Frame nach dem anderen, nie überlappend)
+    // MARK: Bildlieferung (frameQueue): Aufnahme und Erkennung getrennt
 
+    /// Jedes Kamerabild geht sofort an die Videoaufnahme (eigene Queue). Die Erkennung bekommt ein Bild nur, wenn sie
+    /// eingeschaltet und frei ist; Bilder werden für sie nie angestaut. So bremst eine langsame Erkennung die Aufnahme nie.
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        detectionGate.route(record: { recorder.append(sampleBuffer) }, detectOn: queue) { self.detect(sampleBuffer) }
+    }
+
+    /// Die Kamera hat ein Bild verworfen (z. B. Puffer voll); zählt bei laufender Aufnahme als `droppedFrames`
+    func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        recorder.noteDroppedFrame()
+    }
+
+    // MARK: Erkennungsschleife (queue, ein Bild nach dem anderen, nie überlappend)
+
+    private func detect(_ sampleBuffer: CMSampleBuffer) {
         guard processingTracking, let pipeline, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let generation = processingGeneration
         let t0 = CACurrentMediaTime()
@@ -339,6 +456,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                           sub: t.decision.other ? "kein Safari-Tier" : t.locked ? "bestätigt" : t.decision.name != nil ? "\(Int(min(t.decision.confidence, 0.99) * 100)) %" : "unbestimmt",
                           sure: t.decision.sure, colorIndex: t.colorIndex)
         }
+        // Rahmen für das eingebrannte Video (nur aus dem aktuellen Tracking-Durchlauf)
+        if generation == processingGeneration && processingTracking { recorder.updateOverlay(snap, frameSize: size) }
         DispatchQueue.main.async { self.publishFrame(snap, size: size, elapsed: dt, generation: generation) }
     }
 
@@ -404,12 +523,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
            let existing = SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) {
             existing.n += count; existing.t = .now; if existing.thumb == nil { existing.thumb = thumb }
             try? ctx.save()
+            recorder.noteSighting(id: existing.id, name: name)
             self.lastLoggedSpecies = (name, .now, existing.id); return existing.id
         }
         let sensitive = self.catalog.isSensitive(name: name)
         let pos = self.drive.lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < 180 ? Position.from($0, sensitive: sensitive) : nil }
         let s = Sighting(name: name, key: key, n: count, position: pos, thumb: thumb, src: src)
         ctx.insert(s); try? ctx.save()
+        recorder.noteSighting(id: s.id, name: name)   // verknüpft die Sichtung mit einem laufenden Clip
         self.lastLoggedSpecies = (name, .now, s.id)
         if self.settings.snapshots, let image, let pipeline = self.pipeline { self.snapshot(image: image, size: size, names: [name], sightingIds: [s.id], pipeline: pipeline, ctx: ctx) }
         return s.id
