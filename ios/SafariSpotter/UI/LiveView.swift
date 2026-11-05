@@ -6,6 +6,7 @@ import QuartzCore
 /// Kamerabildschirm: Vorschau, Overlay, Tracken, Game Drive, Foto, Sichtungen, Einstellungen
 struct LiveView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: SpeciesCatalog
     @EnvironmentObject private var drive: DriveRecorder
     @EnvironmentObject private var settings: AppSettings
@@ -24,6 +25,10 @@ struct LiveView: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { location in tap(at: location) }
+            if camera.permission == .denied {
+                PermissionNotice(title: "Kein Zugriff auf die Kamera",
+                                 text: "Für die Live-Erkennung braucht Safari Spotter die Kamera. Sichtungen, Galerie, Bildanalyse und Game Drive funktionieren auch ohne.")
+            }
             VStack {
                 topBar
                 Spacer()
@@ -32,9 +37,17 @@ struct LiveView: View {
             .padding(.horizontal, 14)
         }
         .onAppear {
-            camera.attach(context: context); camera.configure(); drive.start()
+            camera.attach(context: context); camera.start(); drive.start()
             if settings.autoTrack { camera.setTracking(true) }
             UIApplication.shared.isIdleTimerDisabled = true
+        }
+        // Kamera im Hintergrund anhalten und beim Zurückkehren wieder starten (iOS unterbricht sie ohnehin)
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: camera.start()
+            case .background: camera.stop()
+            default: break
+            }
         }
         .sheet(isPresented: $showSightings) { SightingsView(camera: camera).environmentObject(catalog).environmentObject(drive) }
         .sheet(isPresented: $showSettings) { SettingsView(camera: camera) }
@@ -57,6 +70,10 @@ struct LiveView: View {
                 }.pill(active: drive.active)
                 Spacer()
                 Button { camera.setTracking(!camera.tracking) } label: { Label(camera.tracking ? "Tracking läuft" : "Tracken", systemImage: "scope") }.pill(active: camera.tracking)
+                    .disabled(camera.permission == .denied)
+            }
+            if drive.active && (drive.authorization == .denied || drive.authorization == .restricted) {
+                Button { openAppSettings() } label: { Label("Standort aus: Game Drive zeichnet nichts auf · Einstellungen", systemImage: "location.slash") }.pill()
             }
         }
         .padding(.top, 8)
@@ -78,17 +95,37 @@ struct LiveView: View {
 
     /// Tipp auf einen Rahmen öffnet die Korrektur (nur bei laufendem Tracking)
     private func tap(at p: CGPoint) {
-        guard camera.tracking else { return }
+        guard camera.tracking, camera.previewSize != .zero else { return }
         // Punkt aus Bildschirm- in Bildkoordinaten (die Vorschau füllt den Bildschirm mit Aspect-Fill)
-        let screen = UIScreen.main.bounds.size
-        let scale = max(screen.width / camera.frameSize.width, screen.height / camera.frameSize.height)
-        let off = CGPoint(x: (camera.frameSize.width * scale - screen.width) / 2, y: (camera.frameSize.height * scale - screen.height) / 2)
-        let img = CGPoint(x: (p.x + off.x) / scale, y: (p.y + off.y) / scale)
+        let img = ImageGeometry.imagePoint(fromView: p, viewSize: camera.previewSize, frame: camera.frameSize)
+        let scale = ImageGeometry.fillScale(frame: camera.frameSize, viewSize: camera.previewSize)
+        // Die Sichtung des Tracks kennt der CameraController; die Korrektur benennt sie um statt eine zweite anzulegen
         if let t = camera.track(at: img, slack: 24 / scale) { correction = CorrectionTarget(trackId: t.id, predicted: t.name.replacingOccurrences(of: "?", with: ""), thumb: nil, sightingId: nil) }
     }
 }
 
 struct CorrectionTarget: Identifiable { let id = UUID(); let trackId: Int?; let predicted: String?; let thumb: Data?; let sightingId: UUID? }
+
+func openAppSettings() {
+    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+}
+
+/// Hinweis bei fehlendem Recht, mit Sprung in die Einstellungen der App
+struct PermissionNotice: View {
+    let title: String
+    let text: String
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "camera.fill").font(.largeTitle)
+            Text(title).font(.headline)
+            Text(text).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
+            Button("Einstellungen öffnen") { openAppSettings() }.buttonStyle(.borderedProminent)
+        }
+        .padding(24)
+        .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+        .padding(24)
+    }
+}
 
 /// AVCaptureVideoPreviewLayer als SwiftUI-View
 struct CameraPreview: UIViewRepresentable {
@@ -127,6 +164,9 @@ struct OverlayView: View {
                         .position(x: geo.size.width / 2, y: geo.size.height * 0.62)
                 }
             }
+            // Vorschaugrösse an die Kamera: Erkennung nur im sichtbaren Ausschnitt, Tipp-Umrechnung
+            .onAppear { camera.setViewSize(geo.size) }
+            .onChange(of: geo.size) { _, s in camera.setViewSize(s) }
         }
     }
 }
