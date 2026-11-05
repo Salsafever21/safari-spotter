@@ -80,17 +80,23 @@ enum NativeBackupExporter {
             "binaryLength": binaryLength
         ]
         let json = try JSONSerialization.data(withJSONObject: manifest)
-        let filename = "safari-spotter-ios-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash))).ssbackup"
+        let filename = "safari-spotter-ios-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))-\(UUID().uuidString).ssbackup"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        let file = try FileHandle(forWritingTo: url)
-        defer { try? file.close() }
-        try file.write(contentsOf: Data("SSBK1\n".utf8))
-        var length = UInt64(json.count).littleEndian
-        try withUnsafeBytes(of: &length) { try file.write(contentsOf: Data($0)) }
-        try file.write(contentsOf: json)
-        for p in photos { try file.write(contentsOf: p.image) }
-        return url
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+        do {
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
+            let file = try FileHandle(forWritingTo: url)
+            defer { try? file.close() }
+            try file.write(contentsOf: Data("SSBK1\n".utf8))
+            var length = UInt64(json.count).littleEndian
+            try withUnsafeBytes(of: &length) { try file.write(contentsOf: Data($0)) }
+            try file.write(contentsOf: json)
+            for p in photos { try file.write(contentsOf: p.image) }
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     private static func milliseconds(_ date: Date) -> Double { date.timeIntervalSince1970 * 1000 }

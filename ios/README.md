@@ -51,11 +51,17 @@ Speicher haben.
 
 In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsdatei importieren** die Datei auswählen. Der
 Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
-Import keine Duplikate an. Für spätere Sicherungen in **Einstellungen → Daten sichern** die aktuelle App-Datei vorbereiten,
-über **Sicherungsdatei teilen** in Dateien sichern und bei Bedarf über denselben Importknopf wiederherstellen.
-Die Datei enthält genaue Aufnahmezeiten und Fahrtspuren und ist unverschlüsselt; beim Teilen können daraus auch geschützte
-Tierstandorte abgeleitet werden. Importierte Originalarchive liegen mit iOS-Dateischutz im App-Speicher und können in den
-Einstellungen einzeln entfernt werden, ohne die importierten Einträge zu löschen.
+Import keine Duplikate an. Für spätere Sicherungen unter **Einstellungen → Daten sichern** ein Passwort mit mindestens
+12 Zeichen vergeben, danach über **Sicherungsdatei teilen** ausserhalb der App sichern. Die iOS-App verschlüsselt die
+gesamte Datei mit einem zufälligen Salt, PBKDF2-HMAC-SHA256 und AES-256-GCM in Blöcken. Zum Wiederherstellen dieselbe Datei
+importieren und das Passwort eingeben. Ohne Passwort ist eine Wiederherstellung nicht möglich; die App speichert es nicht.
+Die unverschlüsselten Originaldaten werden nach dem Erstellen der geschützten Datei aus dem temporären Speicher entfernt.
+Beim Import einer geschützten Datei bleibt im App-Archiv nur die verschlüsselte Originaldatei erhalten.
+
+Ältere unverschlüsselte `.ssbackup`-Dateien der Web-App und früherer iOS-Builds lassen sich weiterhin importieren. Sie
+enthalten genaue Aufnahmezeiten und Fahrtspuren; daraus können auch geschützte Tierstandorte abgeleitet werden. Solche
+Dateien nur an einem vertrauenswürdigen Ort aufbewahren. Importierte Originalarchive liegen mit iOS-Dateischutz im
+App-Speicher und können in den Einstellungen einzeln entfernt werden, ohne die importierten Einträge zu löschen.
 
 ## Was wo liegt
 

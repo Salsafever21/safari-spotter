@@ -129,6 +129,10 @@ struct SettingsView: View {
     @State private var nativeBackupURL: URL?
     @State private var importedArchives: [URL] = []
     @State private var archiveToDelete: URL?
+    @State private var creatingProtectedBackup = false
+    @State private var unlockingProtectedBackup = false
+    @State private var pendingEncryptedURL: URL?
+    @State private var backupBusy = false
     var body: some View {
         NavigationStack {
             Form {
@@ -145,6 +149,10 @@ struct SettingsView: View {
                 Section("Kamera") { Picker("Auflösung", selection: $settings.res) { Text("HD 720p").tag("720"); Text("Full HD 1080p").tag("1080"); Text("4K 2160p").tag("2160") }; Text("Gilt ab dem nächsten App-Start.").font(.caption).foregroundStyle(.secondary) }
                 Section("Bisherige Web-App-Daten") {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
+                        .disabled(backupBusy)
+                    if pendingEncryptedURL != nil {
+                        Button("Passwort erneut eingeben") { unlockingProtectedBackup = true }
+                    }
                     if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
                     Text("Die Originaldatei bleibt in der App erhalten. Ein erneuter Import legt keine doppelten Einträge an.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -162,23 +170,27 @@ struct SettingsView: View {
                     }
                 }
                 Section("Daten sichern") {
-                    Button("Aktuelle App-Daten vorbereiten") {
-                        do {
-                            nativeBackupURL = try NativeBackupExporter.create(context: context, drive: drive)
-                            backupMessage = "Sicherung erstellt. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
-                        } catch { backupMessage = error.localizedDescription }
-                    }
+                    Button("Passwortgeschützte Sicherung erstellen") { creatingProtectedBackup = true }
+                        .disabled(backupBusy)
+                    if backupBusy { ProgressView("Sicherung wird verarbeitet …") }
                     if let nativeBackupURL {
                         ShareLink(item: nativeBackupURL) { Label("Sicherungsdatei teilen", systemImage: "square.and.arrow.up") }
                     }
-                    Text("Enthält Sichtungen, Fotos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich später hier wieder importieren.")
+                    Text("Enthält Sichtungen, Fotos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich mit dem Passwort später hier wieder importieren.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Vertraulich behandeln: Die Sicherung enthält genaue Aufnahmezeiten und Fahrtspuren. Daraus können auch geschützte Tierstandorte abgeleitet werden.")
+                    Text("Passwort sicher aufbewahren: Ohne Passwort lässt sich diese Sicherung nicht wiederherstellen. Ältere unverschlüsselte Sicherungen bleiben importierbar.")
                         .font(.caption).foregroundStyle(.orange)
                 }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
+                .interactiveDismissDisabled(backupBusy)
                 .onAppear { importedArchives = WebBackupImporter.archivedFiles() }
+                .sheet(isPresented: $creatingProtectedBackup) {
+                    BackupPasswordSheet(mode: .create) { password in createProtectedBackup(password) }
+                }
+                .sheet(isPresented: $unlockingProtectedBackup) {
+                    BackupPasswordSheet(mode: .unlock) { password in restoreProtectedBackup(password) }
+                }
                 .confirmationDialog("Archivierte Originaldatei entfernen?", isPresented: Binding(
                     get: { archiveToDelete != nil }, set: { if !$0 { archiveToDelete = nil } })) {
                     Button("Originaldatei entfernen", role: .destructive) {
@@ -193,13 +205,108 @@ struct SettingsView: View {
                     switch result {
                     case .failure(let error): backupMessage = "Datei konnte nicht geöffnet werden: \(error.localizedDescription)"
                     case .success(let url):
-                        do {
-                            let report = try WebBackupImporter.perform(url: url, context: context)
-                            backupMessage = "Importiert: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten. Original gesichert."
-                            importedArchives = WebBackupImporter.archivedFiles()
-                        } catch { backupMessage = error.localizedDescription }
+                        do { try importSelectedBackup(url) }
+                        catch { backupMessage = error.localizedDescription }
                     }
                 }
+        }
+    }
+
+    private func createProtectedBackup(_ password: String) {
+        backupBusy = true
+        nativeBackupURL = nil
+        backupMessage = "Sicherung wird erstellt …"
+        Task {
+            do {
+                let raw = try NativeBackupExporter.create(context: context, drive: drive)
+                defer { try? FileManager.default.removeItem(at: raw) }
+                let protected = try await Task.detached(priority: .userInitiated) {
+                    try EncryptedBackup.encrypt(raw, password: password)
+                }.value
+                nativeBackupURL = protected
+                backupMessage = "Verschlüsselte Sicherung bereit. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
+            } catch { backupMessage = error.localizedDescription }
+            backupBusy = false
+        }
+    }
+
+    private func importSelectedBackup(_ url: URL) throws {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if try EncryptedBackup.isEncrypted(url) {
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent("safari-spotter-import-\(UUID().uuidString).ssbackup")
+            do {
+                try FileManager.default.copyItem(at: url, to: copy)
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: copy.path)
+            } catch {
+                try? FileManager.default.removeItem(at: copy)
+                throw error
+            }
+            if let old = pendingEncryptedURL { try? FileManager.default.removeItem(at: old) }
+            pendingEncryptedURL = copy
+            backupMessage = "Verschlüsselte Sicherung ausgewählt. Passwort zum Wiederherstellen eingeben."
+            unlockingProtectedBackup = true
+        } else {
+            let report = try WebBackupImporter.perform(url: url, context: context)
+            backupMessage = "Importiert: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten. Original gesichert."
+            importedArchives = WebBackupImporter.archivedFiles()
+        }
+    }
+
+    private func restoreProtectedBackup(_ password: String) {
+        guard let encrypted = pendingEncryptedURL else { return }
+        backupBusy = true
+        backupMessage = "Sicherung wird geprüft und importiert …"
+        Task {
+            do {
+                let decrypted = try await Task.detached(priority: .userInitiated) {
+                    try EncryptedBackup.decrypt(encrypted, password: password)
+                }.value
+                defer { try? FileManager.default.removeItem(at: decrypted) }
+                let report = try WebBackupImporter.perform(url: decrypted, context: context, archivedSource: encrypted)
+                backupMessage = "Wiederhergestellt: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten."
+                importedArchives = WebBackupImporter.archivedFiles()
+                try? FileManager.default.removeItem(at: encrypted)
+                pendingEncryptedURL = nil
+            } catch { backupMessage = error.localizedDescription }
+            backupBusy = false
+        }
+    }
+}
+
+private struct BackupPasswordSheet: View {
+    enum Mode { case create, unlock }
+    let mode: Mode
+    let onSubmit: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var confirmation = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                SecureField("Passwort", text: $password)
+                    .textContentType(mode == .create ? .newPassword : .password)
+                if mode == .create {
+                    SecureField("Passwort wiederholen", text: $confirmation)
+                        .textContentType(.newPassword)
+                    Text("Mindestens 12 Zeichen. Dieses Passwort wird nicht in der App gespeichert.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(mode == .create ? "Sicherung schützen" : "Sicherung entsperren")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(mode == .create ? "Erstellen" : "Importieren") {
+                        onSubmit(password)
+                        password = ""; confirmation = ""
+                        dismiss()
+                    }
+                    .disabled(password.isEmpty || (mode == .create && (password.utf8.count < 12 || password != confirmation)))
+                }
+            }
         }
     }
 }

@@ -41,4 +41,22 @@ final class NativeBackupExporterTests: StoreTestCase {
         let again = try WebBackupImporter.perform(url: url, context: newContext)
         XCTAssertEqual(again.sightings + again.photos + again.corrections + again.drives, 0)
     }
+
+    func testEncryptedImportRetainsOnlyEncryptedArchive() throws {
+        addSighting("Elefant")
+        let raw = try NativeBackupExporter.create(context: context)
+        defer { try? FileManager.default.removeItem(at: raw) }
+        let encrypted = try EncryptedBackup.encrypt(raw, password: "test backup password long enough")
+        defer { try? FileManager.default.removeItem(at: encrypted) }
+        let decrypted = try EncryptedBackup.decrypt(encrypted, password: "test backup password long enough")
+        defer { try? FileManager.default.removeItem(at: decrypted) }
+
+        let restored = try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self,
+                                          configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let result = try WebBackupImporter.perform(url: decrypted, context: ModelContext(restored), archivedSource: encrypted)
+        defer { try? FileManager.default.removeItem(at: result.archiveURL) }
+        XCTAssertEqual(result.sightings, 1)
+        XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
+        XCTAssertEqual(try Data(contentsOf: result.archiveURL), try Data(contentsOf: encrypted))
+    }
 }

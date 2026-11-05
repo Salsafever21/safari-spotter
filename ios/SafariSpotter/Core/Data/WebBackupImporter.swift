@@ -40,7 +40,7 @@ enum WebBackupImporter {
             .appendingPathComponent("WebBackups", isDirectory: true)
     }
 
-    static func perform(url: URL, context: ModelContext) throws -> Result {
+    static func perform(url: URL, context: ModelContext, archivedSource: URL? = nil) throws -> Result {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
@@ -90,8 +90,10 @@ enum WebBackupImporter {
         let folder = try archiveFolder()
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let archiveHash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-        let destination = folder.appendingPathComponent("\(archiveHash).ssbackup")
-        if !FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.copyItem(at: url, to: destination) }
+        let destination = folder.appendingPathComponent("\(archiveHash)\(archivedSource == nil ? "" : "-encrypted").ssbackup")
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.copyItem(at: archivedSource ?? url, to: destination)
+        }
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
 
         let origin = manifest["origin"] as? String ?? "unknown"
