@@ -6,9 +6,33 @@ import SwiftData
 import UIKit
 import Combine
 
+private final class PhotoCaptureHandler: NSObject, AVCapturePhotoCaptureDelegate {
+    private let completion: (Result<Data, Error>) -> Void
+    private let lock = NSLock()
+    private var completed = false
+    init(completion: @escaping (Result<Data, Error>) -> Void) { self.completion = completion }
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error { finish(.failure(error)) }
+        else if let data = photo.fileDataRepresentation() { finish(.success(data)) }
+        else { finish(.failure(NSError(domain: "SafariSpotter.Photo", code: 1,
+                                           userInfo: [NSLocalizedDescriptionKey: "Foto konnte nicht gelesen werden"]))) }
+    }
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        if let error { finish(.failure(error)) }
+    }
+    private func finish(_ result: Result<Data, Error>) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        lock.unlock()
+        completion(result)
+    }
+}
+
 /// Kamera (bis 4K), Erkennungsschleife und Sichtungen. Entspricht startCamera/detectLoop/classifyPending/maybeLog der Web-App.
 final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     enum Permission { case unknown, granted, denied }
+    struct Lens: Identifiable, Equatable { let id: String; let name: String }
 
     let session = AVCaptureSession()
     @Published var tracking = false
@@ -20,13 +44,19 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     @Published var zoomFactor: CGFloat = 1
     @Published var maxZoom: CGFloat = 1
     @Published var permission: Permission = .unknown
+    @Published var lenses: [Lens] = []
+    @Published var selectedLensID = ""
+    @Published var capturingPhoto = false
     @Published private(set) var previewSize: CGSize = .zero   // Grösse der Vorschau auf dem Bildschirm (Hauptthread)
 
     struct TrackSnapshot: Identifiable { let id: Int; let box: CGRect; let name: String; let sub: String; let sure: Bool; let colorIndex: Int }
 
     private let queue = DispatchQueue(label: "ch.solution21.safarispotter.camera", qos: .userInitiated)
     private let output = AVCaptureVideoDataOutput()
+    private let photoOutput = AVCapturePhotoOutput()
+    private var photoHandler: PhotoCaptureHandler?
     private var device: AVCaptureDevice?
+    private var availableDevices: [AVCaptureDevice] = []
     private var pipeline: VisionPipeline?
     private let tracker = Tracker()
     private var busy = false
@@ -120,13 +150,19 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             do { pipeline = try VisionPipeline(catalog: catalog) }
             catch { let msg = error.localizedDescription; DispatchQueue.main.async { self.lastError = "Modelle konnten nicht geladen werden: \(msg)" } }
         }
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera,
+                          .builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera],
+            mediaType: .video, position: .back)
+        availableDevices = discovery.devices
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         if session.inputs.isEmpty {
-            // Virtuelle Kamera (Weit + Tele) erlaubt Zoomen über alle Objektive mit einem Gerät
-            let dev = AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
-                ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+            // Ein echtes Weitwinkel startet mit dem gewohnten 1× Bildausschnitt.
+            let dev = availableDevices.first(where: { $0.uniqueID == settings.lensID })
                 ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
             guard let dev, let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) else {
                 DispatchQueue.main.async { self.lastError = "Keine Kamera verfügbar" }; return
             }
@@ -141,21 +177,105 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             guard session.canAddOutput(output) else { DispatchQueue.main.async { self.lastError = "Kamerabild nicht verfügbar" }; return }
             session.addOutput(output)
         }
+        if !session.outputs.contains(photoOutput) {
+            guard session.canAddOutput(photoOutput) else {
+                DispatchQueue.main.async { self.lastError = "Fotoaufnahme nicht verfügbar" }; return
+            }
+            session.addOutput(photoOutput)
+        }
         if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }   // Hochformat
+        if let c = photoOutput.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
         configured = true
+        if let dev = device, !availableDevices.contains(where: { $0.uniqueID == dev.uniqueID }) { availableDevices.insert(dev, at: 0) }
         if let dev = device {
+            let options = availableDevices.map { Lens(id: $0.uniqueID, name: Self.lensName($0)) }
             DispatchQueue.main.async {
                 self.maxZoom = min(dev.activeFormat.videoMaxZoomFactor, 15)
                 self.zoomFactor = dev.videoZoomFactor
+                self.lenses = options
+                self.selectedLensID = dev.uniqueID
             }
         }
     }
 
     func setZoom(_ z: CGFloat) {
-        guard let d = device else { return }
-        queue.async {
+        queue.async { [self] in
+            guard let d = self.device else { return }
             try? d.lockForConfiguration(); d.videoZoomFactor = max(d.minAvailableVideoZoomFactor, min(z, d.maxAvailableVideoZoomFactor)); d.unlockForConfiguration()
             DispatchQueue.main.async { self.zoomFactor = d.videoZoomFactor }
+        }
+    }
+
+    private static func lensName(_ device: AVCaptureDevice) -> String {
+        switch device.deviceType {
+        case .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera: return "Automatisch"
+        case .builtInUltraWideCamera: return "Ultraweit"
+        case .builtInTelephotoCamera: return "Tele"
+        default: return "Weitwinkel"
+        }
+    }
+
+    func selectLens(_ id: String) {
+        queue.async {
+            guard self.configured, let next = self.availableDevices.first(where: { $0.uniqueID == id }),
+                  next.uniqueID != self.device?.uniqueID,
+                  let newInput = try? AVCaptureDeviceInput(device: next),
+                  let oldInput = self.session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first(where: { $0.device.hasMediaType(.video) }) else { return }
+            self.session.beginConfiguration()
+            self.session.removeInput(oldInput)
+            if self.session.canAddInput(newInput) {
+                self.session.addInput(newInput)
+                self.device = next
+            } else {
+                self.session.addInput(oldInput)
+                DispatchQueue.main.async { self.lastError = "Objektiv konnte nicht gewechselt werden" }
+            }
+            if let c = self.output.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
+            if let c = self.photoOutput.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
+            self.session.commitConfiguration()
+            self.tracker.reset()
+            let active = self.device
+            DispatchQueue.main.async {
+                self.tracks = []
+                self.selectedLensID = active?.uniqueID ?? ""
+                self.settings.lensID = active?.uniqueID ?? ""
+                self.maxZoom = min(active?.activeFormat.videoMaxZoomFactor ?? 1, 15)
+                self.zoomFactor = active?.videoZoomFactor ?? 1
+            }
+        }
+    }
+
+    /// A full-resolution still is delivered to the caller; the caller persists it before analysis.
+    func capturePhoto(_ completion: @escaping (Result<Data, Error>) -> Void) {
+        guard !capturingPhoto, permission == .granted else { return }
+        capturingPhoto = true
+        queue.async { [self] in
+            guard self.configured, self.session.isRunning else {
+                DispatchQueue.main.async {
+                    self.capturingPhoto = false
+                    self.lastError = "Kamera ist noch nicht bereit"
+                }
+                return
+            }
+            guard self.photoOutput.availablePhotoCodecTypes.contains(.jpeg) else {
+                DispatchQueue.main.async {
+                    self.capturingPhoto = false
+                    self.lastError = "JPEG-Fotoaufnahme ist auf diesem Gerät nicht verfügbar"
+                }
+                return
+            }
+            let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            settings.flashMode = .off
+            let handler = PhotoCaptureHandler { [weak self] result in
+                guard let self else { return }
+                self.queue.async { self.photoHandler = nil }
+                DispatchQueue.main.async {
+                    self.capturingPhoto = false
+                    completion(result)
+                }
+            }
+            self.photoHandler = handler
+            self.photoOutput.capturePhoto(with: settings, delegate: handler)
         }
     }
 

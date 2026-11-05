@@ -3,10 +3,13 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 26 von 26 Simulator-Tests bestehen. Sie wurde
+Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 27 von 27 Simulator-Tests bestehen. Build 2 wurde
+für die interne TestFlight-Gruppe freigeschaltet. Sie wurde
 auf einem iPhone 18 Pro installiert und gestartet. Der Kameratest auf dem Gerät steht aus, da iPhone-Synchronisierung das
 Kamerabild nicht an den Mac überträgt. Die Web-App kann eine vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese
 importieren sowie ihre eigenen Sichtungen, Fotos, Korrekturen, Fahrten und Einstellungen wieder exportieren und importieren.
+Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto wird vor der Tieranalyse als `PhotoItem` im
+App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
 
 ## Bauen
 
@@ -48,6 +51,9 @@ In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsd
 Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
 Import keine Duplikate an. Für spätere Sicherungen in **Einstellungen → Daten sichern** die aktuelle App-Datei vorbereiten,
 über **Sicherungsdatei teilen** in Dateien sichern und bei Bedarf über denselben Importknopf wiederherstellen.
+Die Datei enthält genaue Aufnahmezeiten und Fahrtspuren und ist unverschlüsselt; beim Teilen können daraus auch geschützte
+Tierstandorte abgeleitet werden. Importierte Originalarchive liegen mit iOS-Dateischutz im App-Speicher und können in den
+Einstellungen einzeln entfernt werden, ohne die importierten Einträge zu löschen.
 
 ## Was wo liegt
 
@@ -169,7 +175,7 @@ Datei baut und läuft die App unverändert.
 
 ## Bekannte Lücken
 
-- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 25/25 Simulator-Tests bestanden und auf dem iPhone 18 Pro
+- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 27/27 Simulator-Tests bestanden und auf dem iPhone 18 Pro
   installiert. Die Live-Kamera konnte über iPhone-Synchronisierung nicht geprüft werden, weil Apple dort das Kamerabild sperrt.
 - **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien wurden mit dem iPhone-Build kompiliert, aber die Erkennung wurde
   noch nicht mit einer echten Kameraaufnahme auf dem iPhone geprüft. Abweichung zur Web-App
@@ -178,8 +184,7 @@ Datei baut und läuft die App unverändert.
 - **Videoaufnahme mit eingebranntem Overlay** fehlt noch. Im Web zeichnet ein Canvas Rahmen ins Video; nativ braucht das einen
   `AVAssetWriter` mit einem Overlay-Layer (`AVVideoCompositionCoreAnimationTool`) oder das Mitschneiden der gerenderten
   Vorschau. Der Audio-Teil (Mikrofon-Recht) ist in `project.yml` schon angelegt.
-- **Linsen**: Das iPhone 18 Pro wechselt mit `builtInTripleCamera` automatisch zwischen den Objektiven; eine manuelle
-  Linsenwahl wie das `<select>` der Web-App ist noch nicht gebaut (`AVCaptureDevice.DiscoverySession`).
+- **Objektivwahl und Foto auf dem Gerät**: Beide Wege kompilieren, sind aber noch nicht mit der echten Kamera getestet.
 - **Hintergrund-Erkennung**: Die Kamera läuft nur im Vordergrund (iOS-Regel) und wird im Hintergrund angehalten; die
   Game-Drive-Aufzeichnung läuft weiter.
 - **Ausrichtung**: Die erste iOS-Version ist auf Hochformat beschränkt, damit Kamerabild, Rahmen und Tippkoordinaten übereinstimmen.

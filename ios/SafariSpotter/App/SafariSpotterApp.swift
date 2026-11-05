@@ -41,6 +41,7 @@ final class AppSettings: ObservableObject {
     @Published var snapshots: Bool { didSet { d.set(snapshots, forKey: "snapshots") } }
     @Published var autoTrack: Bool { didSet { d.set(autoTrack, forKey: "autoTrack") } }
     @Published var res: String { didSet { d.set(res, forKey: "res") } }          // 720 | 1080 | 2160
+    @Published var lensID: String { didSet { d.set(lensID, forKey: "lensID") } }
     private init() {
         threshold = d.object(forKey: "threshold") as? Double ?? 0.4
         labels = d.object(forKey: "labels") as? Bool ?? true
@@ -51,5 +52,6 @@ final class AppSettings: ObservableObject {
         snapshots = d.object(forKey: "snapshots") as? Bool ?? true
         autoTrack = d.object(forKey: "autoTrack") as? Bool ?? false
         res = d.string(forKey: "res") ?? "2160"
+        lensID = d.string(forKey: "lensID") ?? ""
     }
 }

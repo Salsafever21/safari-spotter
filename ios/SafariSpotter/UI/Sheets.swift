@@ -127,6 +127,8 @@ struct SettingsView: View {
     @State private var choosingBackup = false
     @State private var backupMessage: String?
     @State private var nativeBackupURL: URL?
+    @State private var importedArchives: [URL] = []
+    @State private var archiveToDelete: URL?
     var body: some View {
         NavigationStack {
             Form {
@@ -146,6 +148,18 @@ struct SettingsView: View {
                     if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
                     Text("Die Originaldatei bleibt in der App erhalten. Ein erneuter Import legt keine doppelten Einträge an.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !importedArchives.isEmpty {
+                        ForEach(importedArchives, id: \.self) { file in
+                            HStack {
+                                Text("Originalsicherung · \(ByteCountFormatter.string(fromByteCount: Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0), countStyle: .file))")
+                                    .font(.caption)
+                                Spacer()
+                                Button("Entfernen", role: .destructive) { archiveToDelete = file }
+                            }
+                        }
+                        Text("Entfernen löscht nur die archivierte Originaldatei. Importierte Sichtungen und Fotos bleiben in der App.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section("Daten sichern") {
                     Button("Aktuelle App-Daten vorbereiten") {
@@ -159,9 +173,22 @@ struct SettingsView: View {
                     }
                     Text("Enthält Sichtungen, Fotos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich später hier wieder importieren.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Text("Vertraulich behandeln: Die Sicherung enthält genaue Aufnahmezeiten und Fahrtspuren. Daraus können auch geschützte Tierstandorte abgeleitet werden.")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
+                .onAppear { importedArchives = WebBackupImporter.archivedFiles() }
+                .confirmationDialog("Archivierte Originaldatei entfernen?", isPresented: Binding(
+                    get: { archiveToDelete != nil }, set: { if !$0 { archiveToDelete = nil } })) {
+                    Button("Originaldatei entfernen", role: .destructive) {
+                        if let file = archiveToDelete {
+                            do { try WebBackupImporter.deleteArchivedFile(file); importedArchives = WebBackupImporter.archivedFiles() }
+                            catch { backupMessage = error.localizedDescription }
+                        }
+                        archiveToDelete = nil
+                    }
+                } message: { Text("Die importierten Daten bleiben erhalten. Für eine erneute Wiederherstellung dieser Datei muss sie ausserhalb der App vorhanden sein.") }
                 .fileImporter(isPresented: $choosingBackup, allowedContentTypes: [.item]) { result in
                     switch result {
                     case .failure(let error): backupMessage = "Datei konnte nicht geöffnet werden: \(error.localizedDescription)"
@@ -169,6 +196,7 @@ struct SettingsView: View {
                         do {
                             let report = try WebBackupImporter.perform(url: url, context: context)
                             backupMessage = "Importiert: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten. Original gesichert."
+                            importedArchives = WebBackupImporter.archivedFiles()
                         } catch { backupMessage = error.localizedDescription }
                     }
                 }
@@ -179,6 +207,7 @@ struct SettingsView: View {
 /// Bilder aus der Mediathek analysieren (EXIF-Standort und -Zeit werden übernommen)
 struct PhotoAnalysisView: View {
     @ObservedObject var camera: CameraController
+    var initialPhoto: PhotoItem? = nil
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var catalog: SpeciesCatalog
@@ -190,27 +219,37 @@ struct PhotoAnalysisView: View {
     var body: some View {
         NavigationStack {
             VStack {
-                PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .images) { Label("Bilder auswählen", systemImage: "photo.on.rectangle") }.buttonStyle(.borderedProminent)
+                if initialPhoto == nil {
+                    PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .images) { Label("Bilder auswählen", systemImage: "photo.on.rectangle") }.buttonStyle(.borderedProminent)
+                } else { Text("Foto in der Galerie gesichert").font(.caption).foregroundStyle(.secondary) }
                 if busy { ProgressView("Analysiere …") }
                 if let r = result {
                     ZStack(alignment: .topLeading) {
                         Image(uiImage: r.image).resizable().scaledToFit()
                     }
                     List(Array(r.dets.enumerated()), id: \.offset) { _, d in HStack { Text(d.name ?? "Tier").bold(); Spacer(); Text("\(Int(min(d.conf, 0.99) * 100)) %") } }
-                    Button("Als Sichtung speichern") { save(r) }.buttonStyle(.borderedProminent)
+                    if r.dets.isEmpty {
+                        Text("Kein Tier erkannt. Das Foto bleibt in der Galerie.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button(r.dets.isEmpty ? "Foto behalten" : "Als Sichtung speichern") { save(r) }.buttonStyle(.borderedProminent)
                 }
                 Spacer()
             }
             .navigationTitle("Bildanalyse").toolbar { Button("Fertig") { dismiss() } }
             .onChange(of: picked) { Task { await analyze() } }
+            .task(id: initialPhoto?.id) { if let initialPhoto { await analyze(data: initialPhoto.image, capturedAt: initialPhoto.t) } }
         }
     }
     private func analyze() async {
-        guard let item = picked.first, let data = try? await item.loadTransferable(type: Data.self), let ui = UIImage(data: data) else { return }
+        guard let item = picked.first, let data = try? await item.loadTransferable(type: Data.self) else { return }
+        await analyze(data: data)
+    }
+    private func analyze(data: Data, capturedAt: Date? = nil) async {
+        guard let ui = UIImage(data: data) else { return }
         busy = true; defer { busy = false }
         // EXIF
-        var date: Date? = nil, coord: CLLocationCoordinate2D? = nil
-        if let src = CGImageSourceCreateWithData(data as CFData, nil), let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
+        var date: Date? = capturedAt, coord: CLLocationCoordinate2D? = nil
+        if capturedAt == nil, let src = CGImageSourceCreateWithData(data as CFData, nil), let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
             if let g = props[kCGImagePropertyGPSDictionary] as? [CFString: Any], let lat = g[kCGImagePropertyGPSLatitude] as? Double, let lon = g[kCGImagePropertyGPSLongitude] as? Double {
                 coord = CLLocationCoordinate2D(latitude: (g[kCGImagePropertyGPSLatitudeRef] as? String) == "S" ? -lat : lat, longitude: (g[kCGImagePropertyGPSLongitudeRef] as? String) == "W" ? -lon : lon)
             }
@@ -246,9 +285,18 @@ struct PhotoAnalysisView: View {
         if let jpeg = r.image.jpegData(compressionQuality: 0.88) {
             let sensitive = names.contains { catalog.isSensitive(name: $0) }
             let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) }
-            context.insert(PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids))
+                ?? (initialPhoto == nil ? nil : drive.lastFix.map { Position.from($0, sensitive: sensitive) })
+            if let initialPhoto {
+                initialPhoto.species = names
+                initialPhoto.detsJSON = try? JSONEncoder().encode(r.dets)
+                initialPhoto.sightingIds = ids
+                initialPhoto.lat = pos?.lat; initialPhoto.lon = pos?.lon; initialPhoto.coarse = pos?.coarse ?? false
+            } else {
+                context.insert(PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids))
+            }
         }
-        try? context.save(); dismiss()
+        do { try context.save(); dismiss() }
+        catch { camera.lastError = "Bildanalyse konnte nicht gespeichert werden: \(error.localizedDescription)" }
     }
 }
 

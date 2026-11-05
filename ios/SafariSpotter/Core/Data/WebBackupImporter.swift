@@ -21,6 +21,25 @@ enum WebBackupImporter {
         }
     }
 
+    static func archivedFiles() -> [URL] {
+        guard let folder = try? archiveFolder(),
+              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]) else { return [] }
+        return files.filter { $0.pathExtension == "ssbackup" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    static func deleteArchivedFile(_ url: URL) throws {
+        let folder = try archiveFolder().standardizedFileURL
+        guard url.standardizedFileURL.deletingLastPathComponent() == folder,
+              url.pathExtension == "ssbackup" else { throw ImportError.invalid("Archivpfad") }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    private static func archiveFolder() throws -> URL {
+        try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: true)
+            .appendingPathComponent("WebBackups", isDirectory: true)
+    }
+
     static func perform(url: URL, context: ModelContext) throws -> Result {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -68,13 +87,12 @@ enum WebBackupImporter {
         }
         guard cursor == binaryLength else { throw ImportError.invalid("Fotodaten unvollständig") }
 
-        let folder = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                                  appropriateFor: nil, create: true)
-            .appendingPathComponent("WebBackups", isDirectory: true)
+        let folder = try archiveFolder()
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let archiveHash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         let destination = folder.appendingPathComponent("\(archiveHash).ssbackup")
         if !FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.copyItem(at: url, to: destination) }
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
 
         let origin = manifest["origin"] as? String ?? "unknown"
         var sightingNames: [UUID: String] = [:]
@@ -178,7 +196,10 @@ enum WebBackupImporter {
 
     private static func int(_ value: Any?) -> Int? { (value as? NSNumber)?.intValue }
     private static func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
-    private static func sensitive(_ name: String) -> Bool { name.localizedCaseInsensitiveContains("nashorn") || name.lowercased().contains("rhino") }
+    private static func sensitive(_ name: String) -> Bool {
+        if SpeciesCatalog.shared.isSensitive(name: name) { return true }
+        return ["rhino", "white rhino", "black rhino", "rhinoceros"].contains(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
     private static func position(_ value: [String: Any], sensitive: Bool) -> Position? {
         guard let lat = number(value["lat"]), let lon = number(value["lon"]) else { return nil }
         if sensitive && value["coarse"] as? Bool != true { return Position.coarsen(lat: lat, lon: lon) }

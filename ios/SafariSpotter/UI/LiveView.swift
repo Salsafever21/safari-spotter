@@ -17,6 +17,7 @@ struct LiveView: View {
     @State private var showDrive = false
     @State private var correction: CorrectionTarget?
     @State private var photoAnalysis = false
+    @State private var capturedPhoto: PhotoItem?
 
     var body: some View {
         ZStack {
@@ -54,6 +55,7 @@ struct LiveView: View {
         .sheet(isPresented: $showDrive) { DriveLiveView(sightings: sightings) }
         .sheet(item: $correction) { target in CorrectionSheet(target: target, camera: camera) }
         .sheet(isPresented: $photoAnalysis) { PhotoAnalysisView(camera: camera) }
+        .sheet(item: $capturedPhoto) { item in PhotoAnalysisView(camera: camera, initialPhoto: item) }
         .alert("Fehler", isPresented: Binding(get: { camera.lastError != nil }, set: { _ in camera.lastError = nil })) { Button("OK") {} } message: { Text(camera.lastError ?? "") }
     }
 
@@ -63,6 +65,20 @@ struct LiveView: View {
                 Label(camera.status, systemImage: camera.tracking ? "circle.fill" : "circle").pill()
                 Spacer()
                 if camera.tracking { Text("\(Int(camera.fps)) fps").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            }
+            if camera.lenses.count > 1 {
+                Menu {
+                    ForEach(camera.lenses) { lens in
+                        Button { camera.selectLens(lens.id) } label: {
+                            if lens.id == camera.selectedLensID { Label(lens.name, systemImage: "checkmark") }
+                            else { Text(lens.name) }
+                        }
+                    }
+                } label: {
+                    Label(camera.lenses.first(where: { $0.id == camera.selectedLensID })?.name ?? "Objektiv", systemImage: "camera.aperture")
+                }
+                .pill()
+                .disabled(camera.capturingPhoto)
             }
             HStack {
                 Button { if !drive.active { drive.startDrive() }; showDrive = true } label: {
@@ -80,17 +96,49 @@ struct LiveView: View {
     }
 
     private var bottomBar: some View {
-        HStack {
-            Button { showSightings = true } label: {
-                HStack { Text("Sichtungen"); Text("\(sightings.reduce(0) { $0 + $1.n })").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Color.accentColor, in: Capsule()).foregroundStyle(.black) }
-            }.pill()
-            Spacer()
+        VStack(spacing: 10) {
             ZoomSlider(camera: camera)
-            Spacer()
-            Button { photoAnalysis = true } label: { Image(systemName: "photo.on.rectangle") }.pill()
-            Button { showSettings = true } label: { Image(systemName: "gearshape") }.pill()
+                .pill()
+            HStack {
+                Button { showSightings = true } label: {
+                    HStack { Text("Sichtungen"); Text("\(sightings.reduce(0) { $0 + $1.n })").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Color.accentColor, in: Capsule()).foregroundStyle(.black) }
+                }.pill()
+                Spacer()
+                Button { takePhoto() } label: {
+                    Image(systemName: camera.capturingPhoto ? "circle.dotted" : "camera.circle.fill").font(.title2)
+                }
+                .pill()
+                .disabled(camera.permission != .granted || camera.capturingPhoto)
+                Button { photoAnalysis = true } label: { Image(systemName: "photo.on.rectangle") }.pill()
+                Button { showSettings = true } label: { Image(systemName: "gearshape") }.pill()
+            }
         }
         .padding(.bottom, 10)
+    }
+
+    private func takePhoto() {
+        camera.capturePhoto { result in
+            switch result {
+            case .failure(let error): camera.lastError = "Fotoaufnahme fehlgeschlagen: \(error.localizedDescription)"
+            case .success(let data):
+                guard let image = UIImage(data: data) else {
+                    camera.lastError = "Foto konnte nicht geöffnet werden"
+                    return
+                }
+                let thumb = image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7)
+                let item = PhotoItem(t: .now, kind: "cam", species: [], dets: [], image: data,
+                                     thumb: thumb, width: Int(image.size.width * image.scale),
+                                     height: Int(image.size.height * image.scale), position: nil, sightingIds: [])
+                context.insert(item)
+                do {
+                    try context.save()
+                    capturedPhoto = item
+                } catch {
+                    context.delete(item)
+                    camera.lastError = "Foto konnte nicht gespeichert werden: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     /// Tipp auf einen Rahmen öffnet die Korrektur (nur bei laufendem Tracking)

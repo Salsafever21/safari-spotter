@@ -38,7 +38,20 @@ final class WebBackupImporterTests: StoreTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Sighting>()).count, 0)
     }
 
-    private func makeArchive(photo: Data, corruptHash: Bool = false) throws -> (URL, Data) {
+    func testNashornvogelDoesNotLosePrecisePosition() throws {
+        let (url, _) = try makeArchive(photo: StoreTestCase.jpeg(), sightingName: "Nashornvogel")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = try WebBackupImporter.perform(url: url, context: context)
+        defer { try? FileManager.default.removeItem(at: result.archiveURL) }
+        let sighting = try XCTUnwrap(context.fetch(FetchDescriptor<Sighting>()).first)
+        let photo = try XCTUnwrap(context.fetch(FetchDescriptor<PhotoItem>()).first)
+        XCTAssertFalse(sighting.coarse)
+        XCTAssertFalse(photo.coarse)
+        XCTAssertEqual(sighting.lat, -24.98765)
+        XCTAssertEqual(photo.lon, 31.54321)
+    }
+
+    private func makeArchive(photo: Data, corruptHash: Bool = false, sightingName: String = "Breitmaulnashorn") throws -> (URL, Data) {
         let checksum = SHA256.hash(data: photo).map { String(format: "%02x", $0) }.joined()
         let thumb = "data:image/jpeg;base64," + photo.base64EncodedString()
         let manifest: [String: Any] = [
@@ -48,7 +61,7 @@ final class WebBackupImporterTests: StoreTestCase {
             "stored": ["ss.settings": "{}"],
             "snapshot": [
                 "settings": ["threshold": 0.4],
-                "sightings": [["id": "s1", "s": "Breitmaulnashorn", "t": 1_762_336_000_000 as Double,
+                "sightings": [["id": "s1", "s": sightingName, "t": 1_762_336_000_000 as Double,
                                "n": 1, "lat": -24.98765, "lon": 31.54321, "acc": 5]],
                 "trip": ["active": false, "startedAt": 0, "points": [], "dist": 0],
                 "trips": [["startedAt": 1_762_336_000_000 as Double, "endedAt": 1_762_336_060_000 as Double,

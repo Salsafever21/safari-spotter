@@ -111,7 +111,8 @@ enum NativeBackupExporter {
     }
     private static func dataURL(_ data: Data) -> String { "data:image/jpeg;base64," + data.base64EncodedString() }
     private static func sensitive(_ name: String) -> Bool {
-        name.localizedCaseInsensitiveContains("nashorn") || name.lowercased().contains("rhino")
+        if SpeciesCatalog.shared.isSensitive(name: name) { return true }
+        return ["rhino", "white rhino", "black rhino", "rhinoceros"].contains(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     }
     private static func putPosition(_ record: inout [String: Any], lat: Double?, lon: Double?,
                                     acc: Double?, coarse: Bool, sensitive: Bool) {
