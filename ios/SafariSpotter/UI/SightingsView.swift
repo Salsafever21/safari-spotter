@@ -16,6 +16,7 @@ struct SightingsView: View {
     @State private var profile: SpeciesClass?
     @State private var correction: CorrectionTarget?
     @State private var viewer: PhotoItem?
+    @State private var confirmClear = false
 
     var body: some View {
         NavigationStack {
@@ -31,10 +32,18 @@ struct SightingsView: View {
                 default: ReviewView(reviews: reviews)
                 }
             }
-            .navigationTitle("Sichtungen \(sightings.first.map { fmtDate($0.t) } ?? "heute")")
+            .navigationTitle("Sichtungen (alle Tage)")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $profile) { c in ProfileView(cls: c) }
             .sheet(item: $correction) { t in CorrectionSheet(target: t, camera: camera) }
+            .confirmationDialog("Alle Sichtungen aus allen Tagen löschen?", isPresented: $confirmClear) {
+                Button("Alle Sichtungen löschen", role: .destructive) {
+                    sightings.forEach { context.delete($0) }
+                    try? context.save()
+                }
+            } message: {
+                Text("Sichere die Daten vorher in Einstellungen → Daten sichern.")
+            }
         }
     }
 
@@ -61,7 +70,7 @@ struct SightingsView: View {
             Section {
                 ShareLink(item: shareText) { Label("Liste teilen", systemImage: "square.and.arrow.up") }
                 Button("Manuell eintragen") { correction = CorrectionTarget(trackId: nil, predicted: nil, thumb: nil, sightingId: nil) }
-                Button("Liste leeren", role: .destructive) { sightings.forEach { context.delete($0) }; try? context.save() }
+                Button("Alle Sichtungen löschen", role: .destructive) { confirmClear = true }
             }
         }
     }
