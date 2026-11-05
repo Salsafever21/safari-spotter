@@ -214,6 +214,7 @@ struct SettingsView: View {
 
     private func createProtectedBackup(_ password: String) {
         backupBusy = true
+        if let previous = nativeBackupURL { try? FileManager.default.removeItem(at: previous) }
         nativeBackupURL = nil
         backupMessage = "Sicherung wird erstellt …"
         Task {
