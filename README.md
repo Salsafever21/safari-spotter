@@ -35,4 +35,4 @@ Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNat
 
 `ios/` enthält die Vorbereitung für eine echte iOS-App mit denselben Funktionen: beide Modelle als Core ML (`ios/Models/`, Konvertierung in `training/coreml/`), ein SwiftUI-Projekt (`xcodegen generate` in `ios/`) und ein Abgleich der Swift-Logik mit `app.js` (`ios/Tools/logic-check/run.sh`). Der eigene Ein-Modell-Detektor (YOLO) ist in `training/yolo/` vorbereitet. Details in `ios/README.md`.
 
-Version: 1.5.0 (Web), iOS-Vorbereitung 1.0.0
+Version: 1.5.3 (Web), iOS-Vorbereitung 1.0.0

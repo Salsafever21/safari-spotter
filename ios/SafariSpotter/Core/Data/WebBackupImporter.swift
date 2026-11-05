@@ -190,6 +190,7 @@ enum WebBackupImporter {
         return Data(base64Encoded: String(text[text.index(after: comma)...]))
     }
     private static func stableID(_ origin: String, _ kind: String, _ value: Any) -> UUID {
+        if origin.hasPrefix("native:"), let text = value as? String, let id = UUID(uuidString: text) { return id }
         let data = Data("\(origin)/\(kind)/\(value)".utf8)
         var hash = Array(SHA256.hash(data: data).prefix(16))
         hash[6] = (hash[6] & 0x0f) | 0x50

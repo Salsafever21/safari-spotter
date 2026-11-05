@@ -158,10 +158,10 @@ Datei baut und läuft die App unverändert.
 
 ## Bekannte Lücken
 
-- **Nicht kompiliert**: Der Code wurde ohne Xcode geschrieben. Syntax, die Foundation-Logik und die reinen Regeln sind
-  geprüft, Aufrufe in AVFoundation, Vision, SwiftData, MapKit, ImageIO und PhotosUI nicht; die XCTests dafür liegen bereit.
-  Rechne beim ersten Build mit einzelnen kleinen Korrekturen.
-- **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien sind noch nie auf einem iPhone gelaufen. Abweichung zur Web-App
+- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 25/25 Simulator-Tests bestanden und auf dem iPhone 18 Pro
+  installiert. Die Live-Kamera konnte über iPhone-Synchronisierung nicht geprüft werden, weil Apple dort das Kamerabild sperrt.
+- **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien wurden mit dem iPhone-Build kompiliert, aber die Erkennung wurde
+  noch nicht mit einer echten Kameraaufnahme auf dem iPhone geprüft. Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
 - **Videoaufnahme mit eingebranntem Overlay** fehlt noch. Im Web zeichnet ein Canvas Rahmen ins Video; nativ braucht das einen
@@ -171,6 +171,5 @@ Datei baut und läuft die App unverändert.
   Linsenwahl wie das `<select>` der Web-App ist noch nicht gebaut (`AVCaptureDevice.DiscoverySession`).
 - **Hintergrund-Erkennung**: Die Kamera läuft nur im Vordergrund (iOS-Regel) und wird im Hintergrund angehalten; die
   Game-Drive-Aufzeichnung läuft weiter.
-- **Ausrichtung**: Das Kamerabild ist fest auf Hochformat gedreht, `project.yml` erlaubt aber Querformat; Rahmen und Tipp
-  stimmen nur im Hochformat (Entscheidung offen: Hochformat sperren oder Drehung nachführen).
+- **Ausrichtung**: Die erste iOS-Version ist auf Hochformat beschränkt, damit Kamerabild, Rahmen und Tippkoordinaten übereinstimmen.
 - Die Web-App bleibt die Referenz; neue Regeln zuerst dort einbauen und testen, dann portieren und mit dem Logik-Abgleich prüfen.

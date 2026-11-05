@@ -1,7 +1,7 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
@@ -758,7 +758,7 @@ function renderSightings() {
     const tm = document.createElement('span'); tm.className = 't'; tm.textContent = fmtTime(e.t);
     li.append(th, name, st, tm); list.appendChild(li);
   });
-  $('#sightTitle').textContent = 'Sichtungen ' + (sightings.length ? fmtDate(sightings[sightings.length - 1].t) : 'heute');
+  $('#sightTitle').textContent = 'Sichtungen (alle Tage)';
 }
 function countsBySpecies() {
   const m = new Map();
@@ -791,7 +791,12 @@ $('#btnShareSight').addEventListener('click', async () => {
   try { if (navigator.share) { await navigator.share({ title: 'Safari Sichtungen', text }); return; } await navigator.clipboard.writeText(text); toast('Liste kopiert'); }
   catch (e) { if (e && e.name !== 'AbortError') toast('Teilen nicht möglich'); }
 });
-$('#btnClearSight').addEventListener('click', () => { sightings = []; store.set('ss.sightings', sightings); tracks.forEach((t) => { t.logged = true; }); renderSightings(); toast('Liste geleert'); });
+$('#btnClearSight').addEventListener('click', () => {
+  if (!sightings.length) return;
+  if (!confirm('Wirklich alle Sichtungen aus allen Tagen löschen? Sichere sie vorher über Einstellungen → Gesamte Daten sichern.')) return;
+  sightings = []; store.set('ss.sightings', sightings);
+  tracks.forEach((t) => { t.logged = true; }); renderSightings(); toast('Alle Sichtungen gelöscht');
+});
 $('#btnAddManual').addEventListener('click', () => openCorrection({ mode: 'manual' }));
 
 // Zählung als Bild teilen

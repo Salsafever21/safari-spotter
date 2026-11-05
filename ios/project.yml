@@ -11,9 +11,9 @@ settings:
     SWIFT_VERSION: "5.0"   # Xcode akzeptiert nur 4.0, 4.2, 5.0, 6.0 (Sprachmodus, nicht Compilerversion)
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""   # eigene Team-ID eintragen oder in Xcode unter Signing wählen
+    DEVELOPMENT_TEAM: PH2JE4682T
     TARGETED_DEVICE_FAMILY: "1"
-    SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait"
     COREML_CODEGEN_LANGUAGE: Swift
 targets:
   SafariSpotter:
@@ -39,6 +39,7 @@ targets:
       properties:
         CFBundleDisplayName: Safari Spotter
         UILaunchScreen: {}
+        UIRequiresFullScreen: true
         UIBackgroundModes: [location]
         NSCameraUsageDescription: Die Kamera erkennt Tiere live im Bild.
         NSMicrophoneUsageDescription: Für den Ton in Videoaufnahmen.

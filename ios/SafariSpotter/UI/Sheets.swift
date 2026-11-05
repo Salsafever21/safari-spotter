@@ -126,6 +126,7 @@ struct SettingsView: View {
     @EnvironmentObject private var drive: DriveRecorder
     @State private var choosingBackup = false
     @State private var backupMessage: String?
+    @State private var nativeBackupURL: URL?
     var body: some View {
         NavigationStack {
             Form {
@@ -144,6 +145,19 @@ struct SettingsView: View {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
                     if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
                     Text("Die Originaldatei bleibt in der App erhalten. Ein erneuter Import legt keine doppelten Einträge an.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Daten sichern") {
+                    Button("Aktuelle App-Daten vorbereiten") {
+                        do {
+                            nativeBackupURL = try NativeBackupExporter.create(context: context, drive: drive)
+                            backupMessage = "Sicherung erstellt. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
+                        } catch { backupMessage = error.localizedDescription }
+                    }
+                    if let nativeBackupURL {
+                        ShareLink(item: nativeBackupURL) { Label("Sicherungsdatei teilen", systemImage: "square.and.arrow.up") }
+                    }
+                    Text("Enthält Sichtungen, Fotos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich später hier wieder importieren.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
