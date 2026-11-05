@@ -1,7 +1,7 @@
 /* Safari Spotter: Live-Tiererkennung mit Tracking, Sichtungen, Fahrtaufzeichnung und Korrektur-Loop. Alles läuft auf dem Gerät. */
 (() => {
 'use strict';
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 let OVERLAY_MAX = 1920; // Overlay-Canvas wird bei 4K auf Full HD begrenzt, sonst kostet jedes Bild 33 Megapixel Füllung
 const HEAD_DIR = 'models/head/1.2.1/';
 const $ = (s) => document.querySelector(s);
@@ -909,14 +909,31 @@ $('#btnCorrSave').addEventListener('click', async () => {
   if (c.mode === 'track' && c.track) {
     const t = c.track; t.locked = true;
     if (isNone) { tracks = tracks.filter((x) => x !== t); if (t.sightId) removeSighting(t.sightId); }
-    else { t.species = name; t.key = v; t.sure = !isOther; t.other = isOther; t.conf = 1; if (t.sightId) renameSighting(t.sightId, name, v); else if (!isOther) { t.logged = true; t.sightId = logSighting(name, { key: v, thumb: c.img, noMerge: true }); } }
+    else { t.species = name; t.key = v; t.sure = !isOther; t.other = isOther; t.conf = 1; if (t.sightId) { try { await renameSighting(t.sightId, name, v); } catch (e) { toast('Foto-Standort konnte nicht geschützt werden'); return; } } else if (!isOther) { t.logged = true; t.sightId = logSighting(name, { key: v, thumb: c.img, noMerge: true }); } }
   }
-  if (c.mode === 'sighting' && c.id) { if (isNone) removeSighting(c.id); else renameSighting(c.id, name, v); }
+  if (c.mode === 'sighting' && c.id) { if (isNone) removeSighting(c.id); else { try { await renameSighting(c.id, name, v); } catch (e) { toast('Foto-Standort konnte nicht geschützt werden'); return; } } }
   if (c.mode === 'photo' && c.det) { c.det.name = isNone ? null : name; c.det.key = v; c.det.sure = !isNone && !isOther; c.det.conf = 1; renderPhoto(); }
   closeTop('#sheetCorrect'); toast(isNone ? 'Als Fehlalarm gespeichert' : 'Gespeichert: ' + name);
 });
-function renameSighting(id, name, key) {
+async function renameSighting(id, name, key) {
   const e = sightings.find((x) => x.id === id); if (!e) return;
+  if (isSensitive(name)) {
+    const db = await idb.open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('photos', 'readwrite');
+      const store = tx.objectStore('photos');
+      const req = store.getAll();
+      req.onsuccess = () => {
+        for (const ph of req.result) {
+          const protectedPhoto = SafariSpotterPrivacy.protectLinkedPhoto(ph, id, name, coarsen);
+          if (protectedPhoto) store.put(protectedPhoto);
+        }
+      };
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error('Foto konnte nicht aktualisiert werden'));
+      tx.onabort = () => reject(tx.error || new Error('Foto-Aktualisierung abgebrochen'));
+    });
+  }
   e.s = name; e.key = key;
   if (isSensitive(name) && e.lat != null && !e.coarse) { const c = coarsen(e.lat, e.lon); e.lat = c.lat; e.lon = c.lon; e.acc = 10000; e.coarse = true; }
   store.set('ss.sightings', sightings); renderSightings();
