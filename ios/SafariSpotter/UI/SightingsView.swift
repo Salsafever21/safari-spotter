@@ -110,9 +110,12 @@ struct SightingsView: View {
                             }
                         }
                     }
-                    ForEach(sightings.filter { $0.coordinate != nil }) { s in
-                        if s.coarse { MapCircle(center: s.coordinate!, radius: 10000).foregroundStyle(Color.red.opacity(0.08)).stroke(Color.red, lineWidth: 1.5) }
-                        else { Annotation(s.name, coordinate: s.coordinate!) { Circle().fill(Color.green).frame(width: 12, height: 12).overlay(Circle().stroke(.black, lineWidth: 1)) } }
+                    // Getrennt statt if/else im ForEach: genaue Sichtungen als Punkt, Nashörner nur als 10-km-Kreis
+                    ForEach(sightings.filter { $0.coordinate != nil && !$0.coarse }) { s in
+                        Annotation(s.name, coordinate: s.coordinate!) { Circle().fill(Color.green).frame(width: 12, height: 12).overlay(Circle().stroke(.black, lineWidth: 1)) }
+                    }
+                    ForEach(sightings.filter { $0.coordinate != nil && $0.coarse }) { s in
+                        MapCircle(center: s.coordinate!, radius: 10000).foregroundStyle(Color.red.opacity(0.08)).stroke(Color.red, lineWidth: 1.5)
                     }
                     if let f = drive.lastFix { Annotation("", coordinate: f.coordinate) { Circle().fill(Color.cyan).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2)) } }
                 }.frame(height: 320)
@@ -147,6 +150,7 @@ struct GalleryView: View {
     @Environment(\.modelContext) private var context
     @State private var viewer: PhotoItem?
     @State private var busy = false
+    @State private var exportError: String?
     var body: some View {
         ScrollView {
             if photos.isEmpty { Text("Noch keine Fotos. Bei jeder neuen Sichtung speichert die App einen Schnappschuss.").foregroundStyle(.secondary).padding() }
@@ -161,12 +165,19 @@ struct GalleryView: View {
                 }
             }.padding(.horizontal)
             HStack {
-                Button(busy ? "Sichere …" : "Alle in Fotos sichern") { Task { busy = true; for p in photos { try? await PhotoExporter.save(p, jpeg: PhotoExporter.jpegWithMetadata(p.image, date: p.t, coordinate: p.coordinate, description: "Safari Spotter: " + p.species.joined(separator: ", "))) }; busy = false } }.disabled(busy || photos.isEmpty)
+                Button(busy ? "Sichere …" : "Alle in Fotos sichern") {
+                    Task {
+                        busy = true; defer { busy = false }
+                        do { for p in photos { try await PhotoExporter.export(p, isSensitive: { catalog.isSensitive(name: $0) }) } }
+                        catch { exportError = error.localizedDescription }
+                    }
+                }.disabled(busy || photos.isEmpty)
                 Button("Alle löschen", role: .destructive) { photos.forEach { context.delete($0) }; try? context.save() }
             }.buttonStyle(.bordered).padding()
             Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. In der Fotos-App erscheinen sie auf der Orte-Karte. Nashorn-Fotos tragen nur den 10-km-Standort.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
+        .alert("Sichern fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
     }
 }
 
@@ -175,9 +186,11 @@ struct PhotoViewer: View {
     let photos: [PhotoItem]
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var catalog: SpeciesCatalog
     @State private var index = 0
     @State private var boxes = true
     @State private var saved = false
+    @State private var exportError: String?
     var current: PhotoItem { photos.indices.contains(index) ? photos[index] : photo }
     var body: some View {
         VStack {
@@ -196,13 +209,20 @@ struct PhotoViewer: View {
                 .gesture(DragGesture(minimumDistance: 40).onEnded { v in if v.translation.width < -40 { index = min(index + 1, photos.count - 1) } else if v.translation.width > 40 { index = max(index - 1, 0) } })
             }
             HStack {
-                Button(saved ? "Gesichert" : "In Fotos sichern") { Task { try? await PhotoExporter.save(current, jpeg: PhotoExporter.jpegWithMetadata(current.image, date: current.t, coordinate: current.coordinate, description: "Safari Spotter: " + current.species.joined(separator: ", "))); saved = true } }.buttonStyle(.borderedProminent)
+                Button(saved ? "Gesichert" : "In Fotos sichern") {
+                    let item = current
+                    Task {
+                        do { try await PhotoExporter.export(item, isSensitive: { catalog.isSensitive(name: $0) }); saved = true }
+                        catch { exportError = error.localizedDescription }
+                    }
+                }.buttonStyle(.borderedProminent)
                 Button(boxes ? "Rahmen aus" : "Rahmen ein") { boxes.toggle() }.buttonStyle(.bordered)
                 Button("Löschen", role: .destructive) { context.delete(current); try? context.save(); dismiss() }.buttonStyle(.bordered)
             }.padding()
         }
         .onAppear { index = photos.firstIndex { $0.id == photo.id } ?? 0 }
         .onChange(of: index) { saved = false }
+        .alert("Sichern fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
     }
 }
 
@@ -234,8 +254,13 @@ struct ReviewView: View {
         .sheet(item: $picking) { c in SpeciesPicker(predicted: c.predicted) { name, key in c.status = "corrected"; c.label = name; c.labelKey = key; try? context.save() } }
     }
     private var exportURL: URL? {
-        let items = done.map { ["img": "data:image/jpeg;base64," + $0.image.base64EncodedString(), "predicted": $0.predicted as Any, "predKey": $0.predKey as Any, "conf": $0.conf as Any, "label": $0.label as Any, "labelKey": $0.labelKey as Any, "status": $0.status, "t": $0.t.timeIntervalSince1970 * 1000, "region": $0.region as Any] }
-        guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: ["app": "Safari Spotter iOS", "exported": ISO8601DateFormatter().string(from: .now), "items": items]) else { return nil }
+        // Explizite Typen: gemischte Dictionary-Literale ohne Typangabe kompilieren nicht. Fehlende Werte als null wie im Web.
+        let items = done.map { c -> [String: Any] in
+            ["img": "data:image/jpeg;base64," + c.image.base64EncodedString(), "predicted": c.predicted ?? NSNull(), "predKey": c.predKey ?? NSNull(), "conf": c.conf ?? NSNull(),
+             "label": c.label ?? NSNull(), "labelKey": c.labelKey ?? NSNull(), "status": c.status, "t": c.t.timeIntervalSince1970 * 1000, "region": c.region ?? NSNull()]
+        }
+        let payload: [String: Any] = ["app": "Safari Spotter iOS", "exported": ISO8601DateFormatter().string(from: .now), "items": items]
+        guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("korrekturen.json")
         return (try? data.write(to: url)) != nil ? url : nil
     }

@@ -40,11 +40,14 @@ struct CorrectionSheet: View {
     var body: some View {
         SpeciesPicker(predicted: target.predicted) { name, key in
             let isNone = key == "__none", isOther = key == "__other"
-            if let sid = target.sightingId, let s = try? context.fetch(FetchDescriptor<Sighting>(predicate: #Predicate { $0.id == sid })).first {
-                if isNone { context.delete(s) } else { rename(s, to: name, key: key) }
+            let store = SightingStore(context: context, catalog: catalog)
+            if let sid = target.sightingId, let s = store.sighting(id: sid) {
+                // Korrektur aus der Liste: ganze Sichtung; bei Nashorn werden auch die verknüpften Fotos ungenau
+                if isNone { store.remove(s) } else { store.rename(s, to: name, key: key) }
+                camera.noteSightingChanged(sid)
             } else if let tid = target.trackId {
+                // Live-Rahmen: der CameraController benennt die schon geloggte Sichtung um (oder spaltet ab), statt eine zweite anzulegen
                 camera.correct(trackId: tid, name: name, key: key, isNone: isNone, isOther: isOther)
-                if !isNone, !isOther { camera.log(name: name, key: key, thumb: target.thumb, src: "cam", image: nil, size: .zero, noMerge: true) }
             } else if !isNone {
                 camera.log(name: name, key: key, thumb: nil, src: "manual", image: nil, size: .zero, noMerge: true)
             }
@@ -53,10 +56,6 @@ struct CorrectionSheet: View {
             }
             try? context.save()
         }
-    }
-    private func rename(_ s: Sighting, to name: String, key: String) {
-        s.name = name; s.key = key
-        if catalog.isSensitive(name: name), let lat = s.lat, let lon = s.lon, !s.coarse { let c = Position.coarsen(lat: lat, lon: lon); s.lat = c.lat; s.lon = c.lon; s.acc = 10000; s.coarse = true }
     }
 }
 
@@ -203,7 +202,8 @@ struct PhotoAnalysisView: View {
             if let e = props[kCGImagePropertyExifDictionary] as? [CFString: Any], let s = e[kCGImagePropertyExifDateTimeOriginal] as? String { let f = DateFormatter(); f.dateFormat = "yyyy:MM:dd HH:mm:ss"; date = f.date(from: s) }
         }
         guard let pipeline = try? VisionPipeline(catalog: catalog), let cg = ui.cgImage else { return }
-        let ci = CIImage(cgImage: cg).oriented(forExifOrientation: Int32(ui.imageOrientation.exifValue))
+        // Aufrecht und mit Ursprung (0, 0), damit die Ausschnitte in VisionPipeline in App-Koordinaten stimmen
+        let ci = VisionPipeline.uprightImage(cg, exifOrientation: Int32(ui.imageOrientation.exifValue))
         let size = ci.extent.size
         let region = drive.currentRegion(setting: settings.region)
         var dets: [PhotoDet] = []

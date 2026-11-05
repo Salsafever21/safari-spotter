@@ -36,6 +36,9 @@ Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht eine
    etwa halb so schnell. Das Skript trainiert, validiert (mAP50 je Klasse in `runs/spotter-yolo11n/results.csv`) und
    exportiert nach Core ML **mit eingebauter NMS**. Das Pipeline-Modell hat dieselbe Schnittstelle wie
    `ios/Models/SafariSpotterDetector.mlmodel`: Ausgaben `confidence` [N, Klassen] und `coordinates` [N, 4].
+   Vor dem Einlegen die Eingaben prüfen: Hat der Export neben `image` auch `iouThreshold`/`confidenceThreshold`, dürfen sie
+   am NMS-Teilmodell nicht optional sein (sonst bricht `coremlc` ab wie beim Detektor), und Vision braucht dann Werte dafür
+   (`VNCoreMLModel.featureProvider`) oder sie werden wie in `training/coreml/convert.py` fest verdrahtet.
 4. **In die iOS-App einlegen**:
    ```
    cp -R training/yolo/runs/spotter-yolo11n/weights/best.mlpackage ios/Models/SafariSpotterYolo.mlpackage

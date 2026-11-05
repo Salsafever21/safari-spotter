@@ -8,6 +8,8 @@ import Combine
 
 /// Kamera (bis 4K), Erkennungsschleife und Sichtungen. Entspricht startCamera/detectLoop/classifyPending/maybeLog der Web-App.
 final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    enum Permission { case unknown, granted, denied }
+
     let session = AVCaptureSession()
     @Published var tracking = false
     @Published var tracks: [TrackSnapshot] = []     // für das Overlay (Hauptthread)
@@ -17,6 +19,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     @Published var lastError: String?
     @Published var zoomFactor: CGFloat = 1
     @Published var maxZoom: CGFloat = 1
+    @Published var permission: Permission = .unknown
+    @Published private(set) var previewSize: CGSize = .zero   // Grösse der Vorschau auf dem Bildschirm (Hauptthread)
 
     struct TrackSnapshot: Identifiable { let id: Int; let box: CGRect; let name: String; let sub: String; let sure: Bool; let colorIndex: Int }
 
@@ -26,6 +30,9 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var pipeline: VisionPipeline?
     private let tracker = Tracker()
     private var busy = false
+    private var configured = false          // nur auf `queue`
+    private var viewSize: CGSize = .zero    // nur auf `queue`: Vorschaugrösse für den sichtbaren Ausschnitt
+    private var observers: [NSObjectProtocol] = []
     private var lastHintAt: TimeInterval = 0
     private var hintFlip = false
     private var hintRuns: [SpeciesDecision] = []
@@ -35,34 +42,108 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private let catalog = SpeciesCatalog.shared
     private let settings = AppSettings.shared
     private let drive = DriveRecorder.shared
-    private var lastLoggedSpecies: (name: String, t: Date, id: UUID)?
+    private var lastLoggedSpecies: (name: String, t: Date, id: UUID)?   // nur Hauptthread
+
+    override init() {
+        super.init()
+        observeSession()
+    }
+
+    deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
 
     func attach(context: ModelContext) { modelContext = context }
 
+    // MARK: Lebenszyklus und Rechte
+
+    /// Kamera starten (beim Erscheinen und bei Rückkehr in den Vordergrund): Recht prüfen bzw. anfragen, einmal konfigurieren,
+    /// Session starten. Mehrfache Aufrufe sind unschädlich. Aufruf vom Hauptthread.
+    func start() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            permission = .granted
+            queue.async {
+                self.configureIfNeeded()
+                if self.configured && !self.session.isRunning { self.session.startRunning() }
+            }
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { if granted { self.start() } else { self.permission = .denied } }
+            }
+        default:
+            permission = .denied
+        }
+    }
+
+    /// Kamera anhalten (App im Hintergrund). Die Absicht "Tracken" bleibt erhalten, laufende Tracks werden verworfen.
+    func stop() {
+        queue.async {
+            if self.session.isRunning { self.session.stopRunning() }
+            self.tracker.reset(); self.hintRuns = []
+            DispatchQueue.main.async { self.tracks = []; self.hint = nil }
+        }
+    }
+
+    /// Vorschaugrösse vom Bildschirm (Hauptthread); bestimmt den sichtbaren Ausschnitt für die Erkennung
+    func setViewSize(_ s: CGSize) {
+        guard s != previewSize, s.width > 0, s.height > 0 else { return }
+        previewSize = s
+        queue.async { self.viewSize = s }
+    }
+
+    /// Unterbrechungen (Anruf, andere App nutzt die Kamera) und Laufzeitfehler der Session
+    private func observeSession() {
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: .main) { [weak self] n in
+            guard let self else { return }
+            let err = n.userInfo?[AVCaptureSessionErrorKey] as? Error
+            self.lastError = "Kamera-Fehler: \(err?.localizedDescription ?? "unbekannt")"
+            // z. B. nach einem Neustart der Mediendienste: Session neu starten, solange die App aktiv ist
+            if UIApplication.shared.applicationState == .active {
+                self.queue.async { if self.configured && !self.session.isRunning { self.session.startRunning() } }
+            }
+        })
+        observers.append(nc.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: .main) { [weak self] _ in
+            self?.status = "Kamera unterbrochen"
+        })
+        observers.append(nc.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.status = self.tracking ? "Suche Tiere …" : "Tracken aus"
+        })
+    }
+
     // MARK: Kamera
 
-    func configure() {
-        queue.async {
-            do {
-                self.pipeline = try VisionPipeline(catalog: self.catalog)
-            } catch { DispatchQueue.main.async { self.lastError = "Modelle konnten nicht geladen werden: \(error.localizedDescription)" }; return }
-            self.session.beginConfiguration()
-            self.session.sessionPreset = self.settings.res == "2160" ? .hd4K3840x2160 : self.settings.res == "1080" ? .hd1920x1080 : .hd1280x720
+    /// Modelle laden und Session einrichten, genau einmal (auf `queue`). Ohne Modelle bleibt wenigstens das Kamerabild.
+    private func configureIfNeeded() {
+        guard !configured else { return }
+        if pipeline == nil {
+            do { pipeline = try VisionPipeline(catalog: catalog) }
+            catch { let msg = error.localizedDescription; DispatchQueue.main.async { self.lastError = "Modelle konnten nicht geladen werden: \(msg)" } }
+        }
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        if session.inputs.isEmpty {
             // Virtuelle Kamera (Weit + Tele) erlaubt Zoomen über alle Objektive mit einem Gerät
             let dev = AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
                 ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
                 ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-            guard let dev, let input = try? AVCaptureDeviceInput(device: dev), self.session.canAddInput(input) else {
-                DispatchQueue.main.async { self.lastError = "Keine Kamera verfügbar" }; self.session.commitConfiguration(); return
+            guard let dev, let input = try? AVCaptureDeviceInput(device: dev), session.canAddInput(input) else {
+                DispatchQueue.main.async { self.lastError = "Keine Kamera verfügbar" }; return
             }
-            self.session.addInput(input); self.device = dev
-            self.output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-            self.output.alwaysDiscardsLateVideoFrames = true
-            self.output.setSampleBufferDelegate(self, queue: self.queue)
-            if self.session.canAddOutput(self.output) { self.session.addOutput(self.output) }
-            self.output.connection(with: .video)?.videoRotationAngle = 90   // Hochformat
-            self.session.commitConfiguration()
-            self.session.startRunning()
+            session.addInput(input); device = dev
+        }
+        let preset: AVCaptureSession.Preset = settings.res == "2160" ? .hd4K3840x2160 : settings.res == "1080" ? .hd1920x1080 : .hd1280x720
+        session.sessionPreset = session.canSetSessionPreset(preset) ? preset : .high
+        if !session.outputs.contains(output) {
+            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(self, queue: queue)
+            guard session.canAddOutput(output) else { DispatchQueue.main.async { self.lastError = "Kamerabild nicht verfügbar" }; return }
+            session.addOutput(output)
+        }
+        if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }   // Hochformat
+        configured = true
+        if let dev = device {
             DispatchQueue.main.async {
                 self.maxZoom = min(dev.activeFormat.videoMaxZoomFactor, 15)
                 self.zoomFactor = dev.videoZoomFactor
@@ -80,7 +161,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
 
     func setTracking(_ on: Bool) {
         tracking = on
-        if !on { tracker.reset(); tracks = []; hint = nil; status = "Tracken aus" } else { status = "Suche Tiere …" }
+        if !on { queue.async { self.tracker.reset() }; tracks = []; hint = nil; status = "Tracken aus" } else { status = "Suche Tiere …" }
     }
 
     // MARK: Erkennungsschleife (ein Frame nach dem anderen, nie überlappend)
@@ -91,7 +172,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let t0 = CACurrentMediaTime()
         let image = CIImage(cvPixelBuffer: pb)
         let size = image.extent.size
-        let visible = CGRect(origin: .zero, size: size)
+        // Nur der Teil, den die Vorschau (Aspect-Fill) auf dem Bildschirm zeigt, wie visibleRegion() im Web
+        let visible = ImageGeometry.visibleRegion(frame: size, viewSize: viewSize)
         let region = drive.currentRegion(setting: settings.region)
         do {
             let n = settings.far == "max" ? 3 : settings.far == "off" ? 0 : 2
@@ -169,22 +251,20 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
 
     @discardableResult
     private func logOnMain(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int, noMerge: Bool) -> UUID? {
-        var result: UUID?
-        do {
-            guard let ctx = self.modelContext else { return nil }
-            if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30,
-               let existing = try? ctx.fetch(FetchDescriptor<Sighting>(predicate: #Predicate { $0.id == last.id })).first {
-                existing.n += count; existing.t = .now; if existing.thumb == nil { existing.thumb = thumb }
-                self.lastLoggedSpecies = (name, .now, existing.id); return existing.id
-            }
-            let sensitive = self.catalog.isSensitive(name: name)
-            let pos = self.drive.lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < 180 ? Position.from($0, sensitive: sensitive) : nil }
-            let s = Sighting(name: name, key: key, n: count, position: pos, thumb: thumb, src: src)
-            ctx.insert(s); try? ctx.save()
-            self.lastLoggedSpecies = (name, .now, s.id); result = s.id
-            if self.settings.snapshots, let image, let pipeline = self.pipeline { self.snapshot(image: image, size: size, names: [name], sightingIds: [s.id], pipeline: pipeline, ctx: ctx) }
+        guard let ctx = self.modelContext else { return nil }
+        if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30,
+           let existing = SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) {
+            existing.n += count; existing.t = .now; if existing.thumb == nil { existing.thumb = thumb }
+            try? ctx.save()
+            self.lastLoggedSpecies = (name, .now, existing.id); return existing.id
         }
-        return result
+        let sensitive = self.catalog.isSensitive(name: name)
+        let pos = self.drive.lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < 180 ? Position.from($0, sensitive: sensitive) : nil }
+        let s = Sighting(name: name, key: key, n: count, position: pos, thumb: thumb, src: src)
+        ctx.insert(s); try? ctx.save()
+        self.lastLoggedSpecies = (name, .now, s.id)
+        if self.settings.snapshots, let image, let pipeline = self.pipeline { self.snapshot(image: image, size: size, names: [name], sightingIds: [s.id], pipeline: pipeline, ctx: ctx) }
+        return s.id
     }
 
     /// Schnappschuss des Kamerabilds (max. 1280 px) mit den Rahmen, wie snapshotFrame() im Web
@@ -194,9 +274,11 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let ciCtx = CIContext()
         guard let jpeg = ciCtx.jpegRepresentation(of: scaled, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.8]) else { return }
         let dets = tracker.tracks.filter { $0.isShown }.map { t in PhotoDet(x: t.box.minX * k, y: t.box.minY * k, w: t.box.width * k, h: t.box.height * k, name: t.decision.name, conf: t.decision.confidence, sure: t.decision.sure) }
-        let sensitive = names.contains { catalog.isSensitive(name: $0) }
+        // Artenschutz: das Foto wird ungenau, sobald irgendein Tier im Bild sensibel ist, nicht nur das gerade geloggte
+        let sensitive = LocationProtection.containsSensitive(names.map { $0 as String? } + dets.map { $0.name }, isSensitive: { self.catalog.isSensitive(name: $0) })
         let pos = drive.lastFix.map { Position.from($0, sensitive: sensitive) }
-        let thumb = pipeline.jpeg(scaled, rect: CGRect(x: (scaled.extent.width - min(scaled.extent.width, scaled.extent.height)) / 2, y: (scaled.extent.height - min(scaled.extent.width, scaled.extent.height)) / 2, width: min(scaled.extent.width, scaled.extent.height), height: min(scaled.extent.width, scaled.extent.height)), size: 160, quality: 0.7)
+        let side = min(scaled.extent.width, scaled.extent.height)
+        let thumb = pipeline.jpeg(scaled, rect: CGRect(x: (scaled.extent.width - side) / 2, y: (scaled.extent.height - side) / 2, width: side, height: side), size: 160, quality: 0.7)
         ctx.insert(PhotoItem(t: .now, kind: "auto", species: names, dets: dets, image: jpeg, thumb: thumb, width: Int(scaled.extent.width), height: Int(scaled.extent.height), position: pos, sightingIds: sightingIds))
         try? ctx.save()
     }
@@ -211,14 +293,34 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         }
     }
 
-    /// Korrektur per Tipp auf einen Rahmen: Track sperren und Sichtung umbenennen
-    func correct(trackId: Int, name: String?, key: String, isNone: Bool, isOther: Bool) {
+    // MARK: Korrektur
+
+    /// Korrektur per Tipp auf einen Rahmen: Track sperren und die bereits geloggte Sichtung umbenennen, abspalten oder entfernen.
+    /// Nur wenn der Track noch keine Sichtung hat, entsteht eine neue (wie app.js; nie zwei Sichtungen für dasselbe Tier).
+    func correct(trackId: Int, name: String, key: String, isNone: Bool, isOther: Bool) {
         queue.async {
-            guard let t = self.tracker.tracks.first(where: { $0.id == trackId }) else { return }
-            t.locked = true
-            if isNone { self.tracker.tracks.removeAll { $0.id == trackId } }
-            else if let name { t.decision = SpeciesDecision(name: name, key: key, confidence: 1, sure: !isOther, other: isOther) }
+            guard let t = self.tracker.track(id: trackId) else { return }
+            t.locked = true; t.logged = true
+            let existing = t.sightingId
+            if isNone { self.tracker.remove(id: trackId) }
+            else { t.decision = SpeciesDecision(name: name, key: key, confidence: 1, sure: !isOther, other: isOther) }
+            DispatchQueue.main.async {
+                guard let ctx = self.modelContext else { return }
+                let id = SightingStore(context: ctx, catalog: self.catalog).applyTrackCorrection(existingId: existing, name: name, key: key, isNone: isNone, isOther: isOther) {
+                    self.logOnMain(name: name, key: key, thumb: nil, src: "cam", image: nil, size: .zero, count: 1, noMerge: true)
+                }
+                if let existing { self.noteSightingChanged(existing) }
+                self.queue.async { t.sightingId = id }
+            }
         }
+    }
+
+    /// Nach Umbenennen oder Entfernen einer Sichtung (Hauptthread): Die 30-s-Zusammenfassung darf nicht in eine umbenannte
+    /// oder gelöschte Sichtung weiterzählen.
+    func noteSightingChanged(_ id: UUID) {
+        guard let last = lastLoggedSpecies, last.id == id, let ctx = modelContext else { return }
+        if let s = SightingStore(context: ctx, catalog: catalog).sighting(id: id) { lastLoggedSpecies = (s.name, last.t, id) }
+        else { lastLoggedSpecies = nil }
     }
 
     func track(at point: CGPoint, slack: CGFloat) -> TrackSnapshot? {
