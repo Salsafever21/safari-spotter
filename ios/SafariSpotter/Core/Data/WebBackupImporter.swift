@@ -89,7 +89,8 @@ enum WebBackupImporter {
 
         let folder = try archiveFolder()
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let archiveHash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let archiveHash = try archivedSource.map(fileDigest)
+            ?? SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         let destination = folder.appendingPathComponent("\(archiveHash)\(archivedSource == nil ? "" : "-encrypted").ssbackup")
         if !FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.copyItem(at: archivedSource ?? url, to: destination)
@@ -197,6 +198,15 @@ enum WebBackupImporter {
     }
 
     private static func int(_ value: Any?) -> Int? { (value as? NSNumber)?.intValue }
+
+    private static func fileDigest(_ url: URL) throws -> String {
+        let input = try FileHandle(forReadingFrom: url)
+        defer { try? input.close() }
+        var hash = SHA256()
+        while let part = try input.read(upToCount: 1_048_576), !part.isEmpty { hash.update(data: part) }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
     private static func sensitive(_ name: String) -> Bool {
         if SpeciesCatalog.shared.isSensitive(name: name) { return true }

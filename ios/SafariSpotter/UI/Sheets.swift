@@ -147,6 +147,11 @@ struct SettingsView: View {
                     Toggle("Unsichere Treffer sammeln", isOn: $settings.collect)
                 }
                 Section("Kamera") { Picker("Auflösung", selection: $settings.res) { Text("HD 720p").tag("720"); Text("Full HD 1080p").tag("1080"); Text("4K 2160p").tag("2160") }; Text("Gilt ab dem nächsten App-Start.").font(.caption).foregroundStyle(.secondary) }
+                Section("Video") {
+                    Toggle("Rahmen ins Video einbrennen", isOn: $settings.burnIn).disabled(camera.recording)
+                    Text("Videos werden höchstens in Full HD und ohne Ton gespeichert. Die Datei enthält keinen Standort; in der App und beim Sichern in Fotos gilt nur die 10-km-Zelle. Galerie → Videos zum Ansehen und Teilen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Bisherige Web-App-Daten") {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
                         .disabled(backupBusy)
@@ -171,12 +176,16 @@ struct SettingsView: View {
                 }
                 Section("Daten sichern") {
                     Button("Passwortgeschützte Sicherung erstellen") { creatingProtectedBackup = true }
-                        .disabled(backupBusy)
+                        .disabled(backupBusy || camera.recording || camera.recordingFinishing)
+                    if camera.recording || camera.recordingFinishing {
+                        Text("Videoaufnahme beenden und speichern lassen, bevor du eine vollständige Sicherung erstellst.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if backupBusy { ProgressView("Sicherung wird verarbeitet …") }
                     if let nativeBackupURL {
                         ShareLink(item: nativeBackupURL) { Label("Sicherungsdatei teilen", systemImage: "square.and.arrow.up") }
                     }
-                    Text("Enthält Sichtungen, Fotos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich mit dem Passwort später hier wieder importieren.")
+                    Text("Enthält Sichtungen, Fotos, Videos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich mit dem Passwort später hier wieder importieren.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Passwort sicher aufbewahren: Ohne Passwort lässt sich diese Sicherung nicht wiederherstellen. Ältere unverschlüsselte Sicherungen bleiben importierbar.")
                         .font(.caption).foregroundStyle(.orange)
@@ -213,6 +222,10 @@ struct SettingsView: View {
     }
 
     private func createProtectedBackup(_ password: String) {
+        guard !camera.recording, !camera.recordingFinishing else {
+            backupMessage = "Bitte zuerst die Videoaufnahme beenden und speichern lassen."
+            return
+        }
         backupBusy = true
         if let previous = nativeBackupURL { try? FileManager.default.removeItem(at: previous) }
         nativeBackupURL = nil
@@ -280,6 +293,7 @@ struct SettingsView: View {
                     try await Task.detached(priority: .userInitiated) {
                         try NativeArchive.installClips(extracted, clipsDirectory: clipDirectory)
                     }.value
+                    ClipLibrary.shared.reload()
                 }
                 let clipCount = extracted?.clips.filter { $0.pathExtension == "mov" }.count ?? 0
                 backupMessage = "Wiederhergestellt: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen, \(report.drives) Fahrten und \(clipCount) Videos."

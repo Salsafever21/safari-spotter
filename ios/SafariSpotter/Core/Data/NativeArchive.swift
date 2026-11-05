@@ -36,9 +36,7 @@ enum NativeArchive {
     private static let maxFileSize: UInt64 = 20_000_000_000
 
     static func clipsDirectory() throws -> URL {
-        try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                    appropriateFor: nil, create: true)
-            .appendingPathComponent("Clips", isDirectory: true)
+        try ClipFiles.defaultDirectory()
     }
 
     static func isNative(_ url: URL) throws -> Bool {
@@ -124,7 +122,13 @@ enum NativeArchive {
         let manager = FileManager.default
         try manager.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         try checkClipCollisions(contents, clipsDirectory: clipsDirectory)
-        for file in contents.clips {
+        // Publish JSON last: a crash during restore must not expose a playable clip before its movie exists.
+        let ordered = contents.clips.sorted { a, b in
+            let rank = ["mov": 0, "jpg": 1, "json": 2]
+            let left = rank[a.pathExtension] ?? 3, right = rank[b.pathExtension] ?? 3
+            return left == right ? a.lastPathComponent < b.lastPathComponent : left < right
+        }
+        for file in ordered {
             let destination = clipsDirectory.appendingPathComponent(file.lastPathComponent)
             guard !manager.fileExists(atPath: destination.path) else { continue }
             let staging = clipsDirectory.appendingPathComponent(".\(UUID().uuidString).partial")

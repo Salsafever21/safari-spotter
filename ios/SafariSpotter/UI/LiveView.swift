@@ -42,6 +42,14 @@ struct LiveView: View {
             if settings.autoTrack { camera.setTracking(true) }
             UIApplication.shared.isIdleTimerDisabled = true
         }
+        // Clips, die beim letzten Beenden der App noch aufgenommen wurden, prüfen und wieder in die Galerie holen
+        .task { await ClipLibrary.shared.recoverInterrupted(excluding: camera.activeClipID) }
+        // Meldung nach dem Speichern eines Videos nach 3 s ausblenden
+        .task(id: camera.notice) {
+            guard camera.notice != nil else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            camera.notice = nil
+        }
         // Kamera im Hintergrund anhalten und beim Zurückkehren wieder starten (iOS unterbricht sie ohnehin)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -64,8 +72,10 @@ struct LiveView: View {
             HStack {
                 Label(camera.status, systemImage: camera.tracking ? "circle.fill" : "circle").pill()
                 Spacer()
+                if let started = camera.recordingStartedAt { RecordingTimer(startedAt: started) }
                 if camera.tracking { Text("\(Int(camera.fps)) fps").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }
+            if let notice = camera.notice { Label(notice, systemImage: "video.badge.checkmark").pill() }
             if camera.lenses.count > 1 {
                 Menu {
                     ForEach(camera.lenses) { lens in
@@ -75,10 +85,12 @@ struct LiveView: View {
                         }
                     }
                 } label: {
-                    Label(camera.lenses.first(where: { $0.id == camera.selectedLensID })?.name ?? "Objektiv", systemImage: "camera.aperture")
+                    Label(camera.lenses.first(where: { $0.id == camera.selectedLensID })?.name ?? "Objektiv",
+                          systemImage: camera.recording ? "lock.fill" : "camera.aperture")
                 }
                 .pill()
-                .disabled(camera.capturingPhoto)
+                // Kein Objektivwechsel während Foto- oder Videoaufnahme
+                .disabled(camera.capturingPhoto || camera.recording)
             }
             HStack {
                 Button { if !drive.active { drive.startDrive() }; showDrive = true } label: {
@@ -104,6 +116,14 @@ struct LiveView: View {
                     HStack { Text("Sichtungen"); Text("\(sightings.reduce(0) { $0 + $1.n })").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Color.accentColor, in: Capsule()).foregroundStyle(.black) }
                 }.pill()
                 Spacer()
+                Button { camera.toggleRecording() } label: {
+                    Image(systemName: camera.recordingFinishing ? "circle.dotted" : camera.recording ? "stop.circle.fill" : "record.circle").font(.title2)
+                        .foregroundStyle(camera.recording ? Color.white : Color.red)
+                }
+                .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(camera.recording ? Color.red : Color.black.opacity(0.6), in: Capsule())
+                .disabled(camera.permission != .granted || camera.recordingFinishing)
+                .accessibilityLabel(camera.recordingFinishing ? "Video wird gespeichert" : camera.recording ? "Videoaufnahme stoppen" : "Videoaufnahme starten")
                 Button { takePhoto() } label: {
                     Image(systemName: camera.capturingPhoto ? "circle.dotted" : "camera.circle.fill").font(.title2)
                 }
@@ -189,7 +209,7 @@ struct CameraPreview: UIViewRepresentable {
 /// Rahmen und Namen über dem Kamerabild (gleiche Optik wie die Web-App)
 struct OverlayView: View {
     @ObservedObject var camera: CameraController
-    static let colors: [Color] = [Color(hex: 0xf0a93a), Color(hex: 0x5ec8f2), Color(hex: 0x9be36a), Color(hex: 0xf27ab0), Color(hex: 0xc9a3ff), Color(hex: 0x55e0c8), Color(hex: 0xffd166), Color(hex: 0xff9f6e)]
+    static let colors: [Color] = TrackPalette.hex.map { Color(hex: $0) }   // gleiche Farben wie im eingebrannten Video
     var body: some View {
         GeometryReader { geo in
             let scale = max(geo.size.width / camera.frameSize.width, geo.size.height / camera.frameSize.height)
@@ -215,6 +235,21 @@ struct OverlayView: View {
             // Vorschaugrösse an die Kamera: Erkennung nur im sichtbaren Ausschnitt, Tipp-Umrechnung
             .onAppear { camera.setViewSize(geo.size) }
             .onChange(of: geo.size) { _, s in camera.setViewSize(s) }
+        }
+    }
+}
+
+/// Sichtbarer Timer während der Videoaufnahme ("● 01:23")
+struct RecordingTimer: View {
+    let startedAt: Date
+    var body: some View {
+        TimelineView(.periodic(from: startedAt, by: 0.5)) { context in
+            Label(VideoGeometry.timerText(context.date.timeIntervalSince(startedAt)), systemImage: "record.circle.fill")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.red, in: Capsule())
+                .foregroundStyle(.white)
+                .accessibilityLabel("Aufnahme läuft, \(VideoGeometry.timerText(context.date.timeIntervalSince(startedAt)))")
         }
     }
 }

@@ -58,6 +58,17 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertEqual(result.sightings, 1)
         XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
         XCTAssertEqual(try Data(contentsOf: result.archiveURL), try Data(contentsOf: encrypted))
+
+        // Two protected files may contain identical core data but different videos.
+        // Keep both originals instead of using the core checksum as the archive name.
+        let second = try EncryptedBackup.encrypt(raw, password: "another backup password")
+        defer { try? FileManager.default.removeItem(at: second) }
+        let secondDecrypted = try EncryptedBackup.decrypt(second, password: "another backup password")
+        defer { try? FileManager.default.removeItem(at: secondDecrypted) }
+        let secondResult = try WebBackupImporter.perform(url: secondDecrypted, context: ModelContext(restored), archivedSource: second)
+        defer { try? FileManager.default.removeItem(at: secondResult.archiveURL) }
+        XCTAssertNotEqual(secondResult.archiveURL, result.archiveURL)
+        XCTAssertEqual(try Data(contentsOf: secondResult.archiveURL), try Data(contentsOf: second))
     }
 
     func testEncryptedNativeArchiveRestoresPhotoSightingAndClipTogether() throws {
@@ -68,10 +79,13 @@ final class NativeBackupExporterTests: StoreTestCase {
         let clips = root.appendingPathComponent("Clips")
         let restoredClips = root.appendingPathComponent("RestoredClips")
         try FileManager.default.createDirectory(at: clips, withIntermediateDirectories: true)
-        let clipID = UUID().uuidString
+        let clipID = UUID()
         let clipBytes = Data(repeating: 49, count: 2_100_000)
-        try clipBytes.write(to: clips.appendingPathComponent("\(clipID).mov"))
-        try Data("{\"id\":\"\(clipID)\"}".utf8).write(to: clips.appendingPathComponent("\(clipID).json"))
+        try clipBytes.write(to: ClipFiles.movieURL(clipID, in: clips))
+        var clip = ClipRecord(id: clipID, createdAt: .now, burnedIn: false, trackingActive: false, state: .complete)
+        clip.fileSize = Int64(clipBytes.count)
+        clip.duration = 3
+        try ClipFiles.save(clip, in: clips)
 
         let raw = try NativeBackupExporter.create(context: context)
         defer { try? FileManager.default.removeItem(at: raw) }
@@ -93,7 +107,8 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertEqual(result.sightings, 1)
         XCTAssertEqual(result.photos, 1)
         XCTAssertEqual(try newContext.fetch(FetchDescriptor<PhotoItem>()).first?.image, photo.image)
-        XCTAssertEqual(try Data(contentsOf: restoredClips.appendingPathComponent("\(clipID).mov")), clipBytes)
+        XCTAssertEqual(try Data(contentsOf: ClipFiles.movieURL(clipID, in: restoredClips)), clipBytes)
+        XCTAssertEqual(ClipFiles.list(in: restoredClips).first?.id, clipID)
         XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
     }
 }

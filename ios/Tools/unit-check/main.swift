@@ -102,5 +102,8 @@ expect(LocationProtection.renamedSpecies(["Impala", "Elefant"], from: "Elefant",
 expect(LocationProtection.renamedSpecies(["Impala"], from: "Elefant", to: "Nashorn") == ["Impala", "Nashorn"], "Fotoarten: neue Art ergänzt")
 expect(LocationProtection.renamedSpecies(["Nashorn", "Elefant"], from: "Elefant", to: "Nashorn") == ["Nashorn"], "Fotoarten: keine Duplikate")
 
+// MARK: 5. Videoaufnahme (VideoChecks.swift)
+await runVideoChecks()
+
 print(failures == 0 ? "unit-check: \(checks) Prüfungen bestanden." : "unit-check: \(failures) von \(checks) Prüfungen fehlgeschlagen.")
 exit(failures == 0 ? 0 : 1)

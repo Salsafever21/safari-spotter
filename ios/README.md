@@ -3,11 +3,10 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone; 28 von 28 Simulator-Tests bestehen. Build 3 wurde
-für die interne TestFlight-Gruppe freigeschaltet. Sie wurde
-auf einem iPhone 18 Pro installiert und gestartet. Der Kameratest auf dem Gerät steht aus, da iPhone-Synchronisierung das
-Kamerabild nicht an den Mac überträgt. Die Web-App kann eine vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese
-importieren sowie ihre eigenen Sichtungen, Fotos, Korrekturen, Fahrten und Einstellungen wieder exportieren und importieren.
+Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 4 ist in der internen TestFlight-Gruppe;
+Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
+vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
+Videoclips, Korrekturen, Fahrten und Einstellungen passwortgeschützt exportieren und wiederherstellen.
 Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto wird vor der Tieranalyse als `PhotoItem` im
 App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
 Build 4 verhindert, dass ein verspätetes Erkennungsergebnis nach dem Ausschalten des Trackings Status oder Rahmen erneut
@@ -53,7 +52,8 @@ In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsd
 Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
 Import keine Duplikate an. Für spätere Sicherungen unter **Einstellungen → Daten sichern** ein Passwort mit mindestens
 12 Zeichen vergeben, danach über **Sicherungsdatei teilen** ausserhalb der App sichern. Die iOS-App verschlüsselt die
-gesamte Datei mit einem zufälligen Salt, PBKDF2-HMAC-SHA256 und AES-256-GCM in Blöcken. Zum Wiederherstellen dieselbe Datei
+gesamte Datei, einschliesslich aller Clip-Dateien, mit einem zufälligen Salt, PBKDF2-HMAC-SHA256 und AES-256-GCM in Blöcken.
+Die Sicherung lässt sich erst starten, wenn eine laufende Videoaufnahme vollständig gespeichert ist. Zum Wiederherstellen dieselbe Datei
 importieren und das Passwort eingeben. Ohne Passwort ist eine Wiederherstellung nicht möglich; die App speichert es nicht.
 Die unverschlüsselten Originaldaten werden nach dem Erstellen der geschützten Datei aus dem temporären Speicher entfernt.
 Beim Import einer geschützten Datei bleibt im App-Archiv nur die verschlüsselte Originaldatei erhalten.
@@ -82,13 +82,17 @@ ios/
     Core/Data/Models.swift           SwiftData: Sighting, PhotoItem, Correction, Drive; Position mit coarsen()
     Core/Data/SightingStore.swift    Umbenennen, Entfernen, Live-Korrektur (nie doppelt, Abspalten bei n > 1), Fotoschutz
     Core/Privacy/LocationProtection  Artenschutz-Regeln als reine Funktionen (Position, sensible Arten, Korrekturplan)
+    Core/Detection/DetectionGate     Trennt Bildlieferung (Aufnahme) und Erkennung, staut nie Bilder an
+    Core/Video/                      VideoRecorder (AVAssetWriter), VideoOverlayRenderer (eingebrannte Rahmen),
+                                     ClipFiles (Dateiformat, Wiederherstellung, Restore), ClipLibrary (Galerie, Fotos-Export)
+    UI/ClipViews.swift               Videos in der Galerie, Player mit Teilen, In Fotos sichern, Löschen
     Core/Location/DriveRecorder      GPS, Region, Game Drive (Punkte, Statistik, Hintergrund), wie tripStats()
     Core/Export/Exporters.swift      CSV, GPX (Artenschutz-Regeln), JPEG mit EXIF/GPS in die Fotos-Mediathek
     UI/LiveView.swift                Kamerabild, Overlay, Tracken, Game Drive, Zoom
     UI/SightingsView.swift           Liste, Zählung, Karte (MapKit), Galerie, Prüfen
     UI/Sheets.swift                  Artwahl, Korrektur, Steckbrief, Game Drive live, Einstellungen, Bildanalyse
     Resources/                       species-info.json, regions.json, species-labels.json (Kopien aus data/ und Models/)
-  SafariSpotterTests/                XCTests: Bildausschnitte, Artenschutz, Korrektur, Backup und Restore
+  SafariSpotterTests/                XCTests: Bildausschnitte, Artenschutz, Korrektur, Backup und Restore, Videoaufnahme
   Tools/logic-check/                 Abgleich Swift ↔ app.js (siehe unten)
   Tools/unit-check/                  Prüfungen der reinen Swift-Regeln ohne iOS-SDK (siehe unten)
 training/coreml/                     Konvertierung TF.js → Core ML (convert.py, tfjs_load.py, check_reference.js)
@@ -162,7 +166,7 @@ vergröbern, weil `coarsen` beim Längengrad nicht idempotent ist).
 
 ```
 ios/Tools/unit-check/run.sh
-# unit-check: 42 Prüfungen bestanden.
+# unit-check: 110 Prüfungen bestanden.
 ```
 
 ## Eigener Detektor (YOLO)
@@ -171,6 +175,50 @@ Der Pfad ist vorbereitet: Sobald `ios/Models/SafariSpotterYolo.mlpackage` existi
 `training/yolo/README.md`) und in `project.yml` als eigene Zeile eingetragen ist (Vorlage als Kommentar dort), schaltet
 `VisionPipeline` zur Laufzeit um, Rahmen und Art kommen aus einem Modell, der Artenkopf bleibt zweite Meinung. Ohne die
 Datei baut und läuft die App unverändert.
+
+## Videoaufnahme
+
+Roter Knopf in der unteren Leiste startet und stoppt die Aufnahme, mit oder ohne laufende Tiererkennung. Oben läuft ein Timer.
+Videos erscheinen in *Sichtungen → Galerie → Videos* (Abspielen, Teilen, In Fotos sichern, Löschen mit Rückfrage).
+
+- **Unabhängig von der Erkennung**: Die Kamera liefert Bilder auf eine eigene Queue (`CameraController.frameQueue`). Jedes Bild
+  geht sofort an `VideoRecorder.append`, die Erkennung bekommt eines nur, wenn sie frei ist (`DetectionGate.route`); sie wird
+  nie angestaut. `alwaysDiscardsLateVideoFrames` ist darum aus. Bilder, die doch verloren gehen (Kamera-Puffer voll, Schreiber
+  nicht bereit, mehr als 6 Bilder im Rückstau), zählt `droppedFrames` im Clip.
+- **Datei**: QuickTime `.mov`, HEVC (sonst H.264), höchstens Full HD wie im Web (4K wird verkleinert), 30 fps, ohne Ton.
+  Fragmente je Sekunde: Nach einem Absturz bleibt der Clip bis zur letzten Sekunde lesbar und wird beim nächsten Start als
+  "wiederhergestellt" in die Galerie geholt (`ClipFiles.recoverInterrupted`).
+- **Rahmen einbrennen** (Einstellungen → Video, Standard an wie `settings.burnIn` im Web): Rahmen, Eckwinkel, Namen (falls
+  "Namen einblenden" an) und Zeitstempel "Safari Spotter · Datum Zeit" in derselben Optik wie das Live-Overlay.
+- **Beenden**: Stopp-Knopf; automatisch beim Wechsel in den Hintergrund (mit Hintergrundzeit zum Fertigschreiben), bei
+  Kamera-Unterbrechung oder Laufzeitfehler, bei kritischer Temperatur und unter 300 MB freiem Speicher (Start erst ab 1 GB).
+- **Objektiv**: Während der Aufnahme ist die Objektivwahl gesperrt; beim virtuellen Mehrfachobjektiv ("Automatisch") wird
+  auch die automatische Umschaltung gesperrt, der Zoom bleibt dann digital.
+- **Artenschutz**: Die Videodatei trägt nur Erstellungsdatum und Software, nie einen Standort. Die Clip-Metadaten speichern
+  höchstens die 10-km-Zelle; "In Fotos sichern" gibt dem Eintrag ebenfalls nur diese Zelle.
+
+### Clip-Dateien (Schnittstelle für Sicherung und Wiederherstellung)
+
+Clips liegen nicht in SwiftData, sondern als Dateien:
+
+```
+Application Support/Clips/
+  <UUID>.mov    Video
+  <UUID>.json   ClipRecord, Version 1 (ISO-8601-Daten, sortierte Schlüssel)
+  <UUID>.jpg    Vorschaubild, längste Seite höchstens 480 px (optional)
+```
+
+`ClipRecord` (Datei `Core/Video/ClipFiles.swift`): `version`, `id`, `createdAt`, `duration` (s), `width`, `height`, `codec`
+("hvc1"/"avc1"), `fileSize` (Bytes), `frames`, `droppedFrames`, `burnedIn`, `trackingActive`, `species`, `sightingIds`,
+`sensitive`, `lat`/`lon` (nur vergröbert oder fehlend), `coarse`, `lens`, `state` ("recording", "complete", "recovered",
+"damaged"), `file` ("<UUID>.mov"), `thumbnail` ("<UUID>.jpg" oder fehlend).
+
+- Lesen: `ClipFiles.defaultDirectory()`, `ClipFiles.list(in:)`, `ClipFiles.movieURL/metadataURL/thumbnailURL(_:in:)`.
+  Die verschlüsselte Gesamtsicherung nimmt die vorhandenen Clip-Dateien mit, auch beschädigte Dateien für einen späteren
+  Wiederherstellungsversuch. Eine gerade laufende Aufnahme muss vorher beendet sein.
+- Wiederherstellen: `ClipFiles.install(movie:record:thumbnail:in:)` (idempotent, prüft Dateiname und Grösse, lehnt genaue
+  Positionen ab), danach `ClipLibrary.shared.reload()`.
+- Die Einstellung `burnIn` liegt in `AppSettings` (UserDefaults-Schlüssel "burnIn").
 
 ## Artenschutz im Code
 
@@ -183,15 +231,17 @@ Datei baut und läuft die App unverändert.
 
 ## Bekannte Lücken
 
-- **Build und Tests**: Mit Xcode 27.2 auf dem Mac kompiliert, 28/28 Simulator-Tests bestanden und auf dem iPhone 18 Pro
-  installiert. Die Live-Kamera konnte über iPhone-Synchronisierung nicht geprüft werden, weil Apple dort das Kamerabild sperrt.
-- **Modelle auf dem Gerät ungetestet**: Die Core-ML-Dateien wurden mit dem iPhone-Build kompiliert, aber die Erkennung wurde
-  noch nicht mit einer echten Kameraaufnahme auf dem iPhone geprüft. Abweichung zur Web-App
+- **Gerätetest**: Der Tracking-Fix aus Build 4 wurde auf dem iPhone bestätigt. Die Videoaufnahme und der neue Sicherungsweg
+  müssen mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
+- **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
+  mit echten Tieraufnahmen vermessen. Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
-- **Videoaufnahme mit eingebranntem Overlay** fehlt noch. Im Web zeichnet ein Canvas Rahmen ins Video; nativ braucht das einen
-  `AVAssetWriter` mit einem Overlay-Layer (`AVVideoCompositionCoreAnimationTool`) oder das Mitschneiden der gerenderten
-  Vorschau. Der Audio-Teil (Mikrofon-Recht) ist in `project.yml` schon angelegt.
+- **Video ohne Ton**: Die Web-App nimmt den Ton mit, wenn das Mikrofon erlaubt ist; nativ fehlt das noch (braucht
+  `AVCaptureAudioDataOutput` und eine Audiospur im Schreiber, das Mikrofon-Recht steht schon in `project.yml`).
+- **Video auf dem Gerät**: Schreiber, Rahmen und Wiederherstellung sind mit XCTests im Simulator abgedeckt, die echte Kamera
+  (4K, Wärme bei langer Aufnahme mit Erkennung, Hintergrundwechsel) ist noch nicht geprüft. Nicht eingebrannt wird der
+  Hinweis "… vermutet" ohne Rahmen; das Video zeigt das ganze Kamerabild, nicht nur den Bildschirmausschnitt wie im Web.
 - **Objektivwahl und Foto auf dem Gerät**: Beide Wege kompilieren, sind aber noch nicht mit der echten Kamera getestet.
 - **Hintergrund-Erkennung**: Die Kamera läuft nur im Vordergrund (iOS-Regel) und wird im Hintergrund angehalten; die
   Game-Drive-Aufzeichnung läuft weiter.

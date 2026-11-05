@@ -17,12 +17,13 @@ struct SightingsView: View {
     @State private var correction: CorrectionTarget?
     @State private var viewer: PhotoItem?
     @State private var confirmClear = false
+    @ObservedObject private var clipLibrary = ClipLibrary.shared
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("", selection: $tab) {
-                    Text("Liste").tag(0); Text("Zählung").tag(1); Text("Karte").tag(2); Text("Galerie \(photos.count)").tag(3); Text("Prüfen \(reviews.count)").tag(4)
+                    Text("Liste").tag(0); Text("Zählung").tag(1); Text("Karte").tag(2); Text("Galerie \(photos.count + clipLibrary.clips.count)").tag(3); Text("Prüfen \(reviews.count)").tag(4)
                 }.pickerStyle(.segmented).padding()
                 switch tab {
                 case 0: list
@@ -160,8 +161,10 @@ struct GalleryView: View {
     @State private var viewer: PhotoItem?
     @State private var busy = false
     @State private var exportError: String?
+    @ObservedObject private var clipLibrary = ClipLibrary.shared
     var body: some View {
         ScrollView {
+            ClipGrid(library: clipLibrary)
             if photos.isEmpty { Text("Noch keine Fotos. Bei jeder neuen Sichtung speichert die App einen Schnappschuss.").foregroundStyle(.secondary).padding() }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], spacing: 6) {
                 ForEach(photos) { p in
