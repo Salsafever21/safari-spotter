@@ -247,10 +247,19 @@ Application Support/Clips/
 
 ## Bekannte Lücken
 
+Core-ML-Artenkopf auf lokalen Bildern prüfen (Mac):
+
+```
+xcrun swift ios/Tools/model-check/main.swift ios/Models/SafariSpotterSpecies.mlpackage training/data [Art-Schlüssel]
+```
+
 - **Gerätetest**: Der Tracking-Fix aus Build 4 und der Sicherungsweg aus Build 6 wurden auf dem iPhone bestätigt. Die
   Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
   mit echten Tieraufnahmen vermessen. Die Trainingsbilder für das vorbereitete YOLO-Modell liegen derzeit nicht im Repository.
+  `ios/Tools/model-check/main.swift` prüft den vorhandenen Core-ML-Artenkopf auf einem lokalen Bildordner. Auf 91 neu
+  geladenen Elefantenfotos waren 76 Top-1-Treffer; diese Bilder können mit dem bisherigen Trainingssatz überlappen und
+  belegen keine Feldgenauigkeit. Ein Nachtbild wurde deutlich falsch als Nashorn eingestuft.
   Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.

@@ -6,6 +6,11 @@ direkt, sieht mit 640 Pixeln Eingabe ferne Tiere besser und läuft als Core-ML-M
 
 Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht einen Mac mit Apple Silicon oder eine GPU).
 
+**Lizenz vor Verteilung klären:** Ultralytics stellt YOLO-Code und Modellgewichte unter AGPL-3.0 oder einer Enterprise-Lizenz
+bereit ([offizielle Lizenzangaben](https://github.com/ultralytics/ultralytics/blob/main/README.md#-license)). Ein damit
+trainiertes Modell wird nicht ohne geklärte Lizenz in Safari Spotter oder TestFlight übernommen. Der aktuelle Detektor
+und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
+
 ## Ablauf
 
 1. **Fotos holen** (falls `training/data/` fehlt), wie fürs Artenmodell. Der Downloader nimmt nur CC0-/CC-BY-Fotos,
