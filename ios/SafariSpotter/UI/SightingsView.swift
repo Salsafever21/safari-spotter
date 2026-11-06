@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import MapKit
 import UIKit
+import Combine
 
 /// Sichtungen: Liste, Zählung, Karte (Route, Fotos, Sichtungen), Galerie, Prüfen
 struct SightingsView: View {
@@ -15,6 +16,10 @@ struct SightingsView: View {
     @Query(sort: \Drive.startedAt, order: .reverse) private var drives: [Drive]
     @Query(filter: #Predicate<Correction> { $0.status == "review" }) private var reviews: [Correction]
     @State private var tab = 0
+    @State private var historyFilter = SightingHistoryFilter()
+    @State private var referenceDate = Date.now
+    @State private var csvShare: SightingCSVShare?
+    @FocusState private var searchFocused: Bool
     @State private var profile: SpeciesClass?
     @State private var correction: CorrectionTarget?
     @State private var confirmClear = false
@@ -27,6 +32,7 @@ struct SightingsView: View {
                 Picker("", selection: $tab) {
                     Text("Liste").tag(0); Text("Zählung").tag(1); Text("Karte").tag(2); Text("Galerie \(photos.count + clipLibrary.clips.count)").tag(3); Text("Prüfen \(reviews.count)").tag(4)
                 }.pickerStyle(.segmented).padding()
+                if tab == 0 || tab == 1 { filterBar }
                 switch tab {
                 case 0: list
                 case 1: stats
@@ -35,8 +41,16 @@ struct SightingsView: View {
                 default: ReviewView(reviews: reviews)
                 }
             }
-            .navigationTitle("Sichtungen (alle Tage)")
+            .navigationTitle("Sichtungen")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { referenceDate = .now }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in referenceDate = .now }
+            .sheet(item: $csvShare) { item in
+                FileShareSheet(url: item.url) {
+                    try? FileManager.default.removeItem(at: item.url)
+                    csvShare = nil
+                }.interactiveDismissDisabled()
+            }
             .sheet(item: $profile) { c in ProfileView(cls: c) }
             .sheet(item: $correction) { t in CorrectionSheet(target: t, camera: camera) }
             .confirmationDialog("Alle Sichtungen aus allen Tagen löschen?", isPresented: $confirmClear) {
@@ -47,7 +61,7 @@ struct SightingsView: View {
             } message: {
                 Text("Sichere die Daten vorher in Einstellungen → Daten sichern.")
             }
-            .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
+            .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
                 Button("OK") {}
             } message: { Text(storageError ?? "") }
         }
@@ -61,57 +75,112 @@ struct SightingsView: View {
         }
     }
 
+    private var filteredSightings: [Sighting] { historyFilter.apply(to: sightings, now: referenceDate) }
+    private var counts: [(String, Int)] { SightingHistoryFilter.counts(filteredSightings).map { ($0.name, $0.count) } }
+    private var shareText: String { historyFilter.shareText(sightings: sightings, now: referenceDate) }
+
+    private var filterBar: some View {
+        VStack(spacing: 8) {
+            Picker("Zeitraum", selection: $historyFilter.scope) {
+                ForEach(SightingDateScope.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented)
+            if historyFilter.scope == .day {
+                DatePicker("Datum", selection: $historyFilter.selectedDay, displayedComponents: .date)
+            }
+            HStack {
+                TextField("Art suchen", text: $historyFilter.query)
+                    .textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                    .focused($searchFocused).submitLabel(.search).onSubmit { searchFocused = false }
+                    .accessibilityIdentifier("sighting-species-search")
+                if !historyFilter.query.isEmpty {
+                    Button { historyFilter.query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .accessibilityLabel("Artfilter löschen")
+                }
+            }
+            HStack {
+                Text("\(historyFilter.title(now: referenceDate)) · \(filteredSightings.count) von \(sightings.count) Einträgen")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("sighting-filter-summary")
+                Spacer()
+                if historyFilter.scope != .all || !historyFilter.query.isEmpty {
+                    Button("Alle anzeigen", action: resetFilter).font(.caption)
+                        .accessibilityIdentifier("sighting-filter-reset")
+                }
+            }
+        }.padding(.horizontal).padding(.bottom, 8)
+    }
+
+    private func resetFilter() { historyFilter.scope = .all; historyFilter.query = ""; searchFocused = false }
+
     // MARK: Liste
     private var list: some View {
         List {
-            if sightings.isEmpty { Text("Noch keine Sichtungen. Sobald ein Tier sicher erkannt wird, landet es hier.").foregroundStyle(.secondary) }
-            ForEach(sightings) { s in
-                HStack(spacing: 10) {
-                    Button { correction = CorrectionTarget(trackId: nil, predicted: s.name, thumb: s.thumb, sightingId: s.id) } label: {
-                        if let d = s.thumb, let ui = UIImage(data: d) { Image(uiImage: ui).resizable().scaledToFill().frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8)) }
-                        else { RoundedRectangle(cornerRadius: 8).fill(.quaternary).frame(width: 44, height: 44).overlay(Text(s.src == "manual" ? "manuell" : "ohne Bild").font(.system(size: 9)).foregroundStyle(.secondary)) }
-                    }.buttonStyle(.plain)
-                    VStack(alignment: .leading) {
-                        Button(s.name) { profile = catalog.cls(name: s.name) ?? catalog.classes.first { $0.group == s.name } }.font(.headline).buttonStyle(.plain)
-                        Text(s.lat == nil ? "ohne Standort" : s.coarse ? "Standort ±10 km (Artenschutz)" : "GPS ±\(Int(s.acc ?? 0)) m").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Stepper("\(s.n)", value: Binding(get: { s.n }, set: { v in
-                        if v <= 0 { context.delete(s) } else { s.n = v }
-                        commit("Zählung speichern")
-                    })).labelsHidden()
-                    Text("\(s.n)").monospacedDigit().frame(width: 28)
-                    Text(fmtTime(s.t)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if filteredSightings.isEmpty {
+                Text(sightings.isEmpty ? "Noch keine Sichtungen. Sobald ein Tier sicher erkannt wird, landet es hier."
+                     : "Keine Sichtungen für diese Auswahl. Über Alle anzeigen erreichst du die übrigen Tage.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(SightingHistoryFilter.days(filteredSightings)) { day in
+                Section(SightingHistoryFilter.dateLabel(day.date)) {
+                    ForEach(day.sightings) { s in sightingRow(s) }
                 }
             }
             Section {
-                ShareLink(item: shareText) { Label("Liste teilen", systemImage: "square.and.arrow.up") }
-                Button("Manuell eintragen") { correction = CorrectionTarget(trackId: nil, predicted: nil, thumb: nil, sightingId: nil) }
-                Button("Alle Sichtungen löschen", role: .destructive) { confirmClear = true }
+                ShareLink(item: shareText) { Label("Ausgewählte Liste teilen", systemImage: "square.and.arrow.up") }
+                    .disabled(filteredSightings.isEmpty)
+                Button("Sichtung für heute eintragen") {
+                    historyFilter.scope = .today; historyFilter.query = ""
+                    referenceDate = .now
+                    correction = CorrectionTarget(trackId: nil, predicted: nil, thumb: nil, sightingId: nil)
+                }
+                if historyFilter.scope == .all && historyFilter.query.isEmpty {
+                    Button("Alle Sichtungen löschen", role: .destructive) { confirmClear = true }
+                        .disabled(sightings.isEmpty)
+                }
             }
         }
     }
 
-    private var counts: [(String, Int)] {
-        var m: [String: Int] = [:]; sightings.forEach { m[$0.name, default: 0] += $0.n }
-        return m.sorted { $0.value > $1.value }
+    private func sightingRow(_ s: Sighting) -> some View {
+        HStack(spacing: 10) {
+            Button { correction = CorrectionTarget(trackId: nil, predicted: s.name, thumb: s.thumb, sightingId: s.id) } label: {
+                if let d = s.thumb, let ui = UIImage(data: d) { Image(uiImage: ui).resizable().scaledToFill().frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8)) }
+                else { RoundedRectangle(cornerRadius: 8).fill(.quaternary).frame(width: 44, height: 44).overlay(Text(s.src == "manual" ? "manuell" : "ohne Bild").font(.system(size: 9)).foregroundStyle(.secondary)) }
+            }.buttonStyle(.plain)
+            VStack(alignment: .leading) {
+                Button(s.name) { profile = catalog.cls(name: s.name) ?? catalog.classes.first { $0.group == s.name } }.font(.headline).buttonStyle(.plain)
+                Text(s.lat == nil ? "ohne Standort" : s.coarse ? "Standort ±10 km (Artenschutz)" : "GPS ±\(Int(s.acc ?? 0)) m").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Stepper("\(s.n)", value: Binding(get: { s.n }, set: { v in
+                if v <= 0 { context.delete(s) } else { s.n = v }
+                commit("Zählung speichern")
+            })).labelsHidden()
+            Text("\(s.n)").monospacedDigit().frame(width: 28)
+            Text(fmtTime(s.t)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
     }
-    private var shareText: String {
-        let total = counts.reduce(0) { $0 + $1.1 }
-        return "Safari \(fmtDate(.now)): \(total) Tiere, \(counts.count) Arten\n" + counts.map { "\($0.0) \($0.1)×" }.joined(separator: "\n")
+
+    private func exportCSV() {
+        do {
+            try TextShareFile.removeStale()
+            let content = Exporters.csv(sightings: filteredSightings.reversed(), catalog: catalog,
+                                        privacySightings: sightings, privacyPhotos: photos)
+            csvShare = SightingCSVShare(url: try TextShareFile.create(content, kind: .sightings, extension: "csv"))
+        } catch { storageError = "CSV konnte nicht erstellt werden: \(error.localizedDescription)" }
     }
 
     // MARK: Zählung
     private var stats: some View {
         List {
-            HStack { tile("\(counts.reduce(0) { $0 + $1.1 })", "Tiere"); tile("\(counts.count)", "Arten"); tile(fmtKm(drive.active ? drive.dist : (drives.first?.dist ?? 0)), "km") }
+            HStack { tile("\(counts.reduce(0) { $0 + $1.1 })", "Tiere"); tile("\(counts.count)", "Arten"); tile("\(filteredSightings.count)", "Einträge") }
             Section("Big Five") {
                 let big5: [(String, (String) -> Bool)] = [("Elefant", { $0 == "Elefant" }), ("Nashorn", { $0.localizedCaseInsensitiveContains("nashorn") }), ("Büffel", { $0 == "Kaffernbüffel" }), ("Löwe", { $0.hasPrefix("Löw") }), ("Leopard", { $0 == "Leopard" })]
                 HStack { ForEach(big5, id: \.0) { b in let done = counts.contains { b.1($0.0) }; Text(b.0).font(.caption).frame(maxWidth: .infinity).padding(.vertical, 8).background(done ? Color.green.opacity(0.2) : Color.clear).overlay(RoundedRectangle(cornerRadius: 8).stroke(done ? Color.green : Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: done ? [] : [4]))) } }
             }
             Section("Pro Art") { ForEach(counts, id: \.0) { c in HStack { Text(c.0); Spacer(); Text("\(c.1)").monospacedDigit().bold() } } }
             Section {
-                if let url = Exporters.tempFile(Exporters.csv(sightings: sightings.reversed(), catalog: catalog, privacyPhotos: photos), name: "sichtungen.csv") { ShareLink(item: url) { Label("CSV exportieren", systemImage: "tablecells") } }
+                Button(action: exportCSV) { Label("Auswahl als CSV teilen", systemImage: "tablecells") }.disabled(filteredSightings.isEmpty)
             }
         }
     }
@@ -320,3 +389,5 @@ struct FileShareSheet: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
+
+private struct SightingCSVShare: Identifiable { let url: URL; var id: URL { url } }

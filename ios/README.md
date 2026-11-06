@@ -15,6 +15,15 @@ wie SANParks für Kruger und Addo dokumentiert. Eine Auswahl nach Park oder Rese
 vorgesehen. Die Reiseauswahl kann in den Einstellungen geändert werden und ist in der nativen Sicherung enthalten.
 Beim Onboarding wird die Kamera noch nicht geöffnet; der SwiftData-Speicher und die bisherigen Sichtungen bleiben erhalten.
 
+Unter **Sichtungen → Liste/Zählung** lassen sich alle Tage, heute oder ein bestimmter Kalendertag auswählen und nach
+Artnamen durchsuchen. Die Liste hat Datumüberschriften und zeigt die Zahl der sichtbaren und insgesamt gespeicherten
+Einträge. Beim erneuten Öffnen werden alle Tage angezeigt; **Alle anzeigen** setzt die Auswahl zurück. Der Filter ist
+eine reine Ansicht und entfernt keine Daten. Geteilte Zusammenfassungen nennen den tatsächlichen Zeitraum und den
+Artfilter. CSV-Dateien entstehen erst beim Tippen auf **Auswahl als CSV teilen**, enthalten genau diese Auswahl und
+bleiben während der Freigabe unverändert. Der Artenschutz berücksichtigt dabei weiterhin sämtliche Sichtungen und Fotos,
+auch wenn sie ausgeblendet sind. CSV-Felder erhalten bei Trennzeichen, Anführungszeichen oder Zeilenumbrüchen die
+nötige Maskierung; Namen, die als Tabellenformel interpretiert werden könnten, werden als Text ausgegeben.
+
 Unter **Sichtungen → Karte** zeigt die Gesamtkarte alle Aufnahmen. Jede gespeicherte Fahrt lässt sich separat öffnen:
 Route, Statistik, Stopps, Kilometer-Splits, Sichtungen und Fotos werden für ihren gespeicherten Zeitraum angezeigt.
 GPX und CSV lassen sich für genau diese Fahrt teilen. Der Artenschutz berücksichtigt auch Nashorn-Sichtungen und
@@ -25,7 +34,7 @@ gemeldet und können nicht als scheinbar vollständige GPX-Datei exportiert werd
 Exportdateien werden erst beim Tippen erstellt und nach Abschluss oder Abbruch der Freigabe entfernt.
 Beim Sichern geschützter Fotos in die Fotos-Mediathek wird die Aufnahmezeit auf die Stunde gerundet. Die exportierte
 Bilddatei wird ohne Quell-Metadaten neu geschrieben, damit keine zweite ursprüngliche Zeitangabe mitgeht.
-Verifiziert am 6. November 2026 mit Xcode 27.2: 78 Logiktests und vier UI-Abläufe im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
+Verifiziert am 6. November 2026 mit Xcode 27.2: 90 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
 mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 

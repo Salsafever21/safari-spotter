@@ -28,8 +28,6 @@ struct DriveWindow {
 /// Der sichtbare Fahrtinhalt und der Schutzkontext für den Export sind getrennt:
 /// Eine Nashorn-Sichtung knapp ausserhalb der Fahrt muss die angrenzende Spur trotzdem schützen.
 enum DriveHistoryExport {
-    private static let prefix = "safari-spotter-fahrt-"
-
     static func gpx(drive: Drive, sightings: [Sighting], photos: [PhotoItem] = [], catalog: SpeciesCatalog) throws -> String {
         let window = try DriveWindow(start: drive.startedAt, end: drive.endedAt)
         let points = window.points(from: try drive.decodedPoints())
@@ -45,26 +43,11 @@ enum DriveHistoryExport {
 
     static func createFile(_ content: String, extension suffix: String,
                            directory: URL = FileManager.default.temporaryDirectory) throws -> URL {
-        let url = directory.appendingPathComponent(prefix + UUID().uuidString).appendingPathExtension(suffix)
-        do {
-            try Data(content.utf8).write(to: url, options: .atomic)
-            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
-            return url
-        } catch {
-            try? FileManager.default.removeItem(at: url)
-            throw error
-        }
+        try TextShareFile.create(content, kind: .drive, extension: suffix, directory: directory)
     }
 
     static func removeStale(in directory: URL = FileManager.default.temporaryDirectory,
                             before cutoff: Date = Date().addingTimeInterval(-3600)) throws {
-        let files = try FileManager.default.contentsOfDirectory(at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey])
-        for url in files where url.lastPathComponent.hasPrefix(prefix) && ["gpx", "csv"].contains(url.pathExtension) {
-            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
-            if values.isRegularFile == true, let changed = values.contentModificationDate, changed < cutoff {
-                try FileManager.default.removeItem(at: url)
-            }
-        }
+        try TextShareFile.removeStale(in: directory, before: cutoff)
     }
 }

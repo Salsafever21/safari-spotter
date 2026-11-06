@@ -10,6 +10,16 @@ import CryptoKit
 enum Exporters {
     static func hourFloor(_ d: Date) -> Date { Date(timeIntervalSince1970: floor(d.timeIntervalSince1970 / 3600) * 3600) }
 
+    private static func csvField(_ value: String, literalText: Bool = false) -> String {
+        var text = value
+        if literalText, let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first,
+           "=+-@".contains(first) { text = "'" + text }
+        if text.contains(where: { $0 == ";" || $0 == "\"" || $0 == "\n" || $0 == "\r" }) {
+            return "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return text
+    }
+
     private static func protectedTimes(sightings: [Sighting], photos: [PhotoItem], catalog: SpeciesCatalog) -> [TimeInterval] {
         sightings.filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
         + photos.filter { PhotoExporter.requiresProtection(for: $0, isSensitive: catalog.isSensitive) }.map { $0.t.timeIntervalSince1970 }
@@ -26,7 +36,8 @@ enum Exporters {
             let t = sens ? hourFloor(s.t) : s.t
             let prec = position == nil ? "" : sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m"
             let lat = position.map { String(format: sens ? "%.2f" : "%.5f", $0.lat) } ?? "", lon = position.map { String(format: sens ? "%.2f" : "%.5f", $0.lon) } ?? ""
-            rows.append([df.string(from: t), tf.string(from: t) + (sens ? " (gerundet)" : ""), s.name, String(s.n), lat, lon, prec].joined(separator: ";"))
+            rows.append([csvField(df.string(from: t)), csvField(tf.string(from: t) + (sens ? " (gerundet)" : "")),
+                         csvField(s.name, literalText: true), String(s.n), lat, lon, csvField(prec)].joined(separator: ";"))
         }
         return "\u{FEFF}" + rows.joined(separator: "\n")
     }
@@ -56,11 +67,6 @@ enum Exporters {
         return g + "</gpx>\n"
     }
 
-    /// Schreibt Text in eine temporäre Datei zum Teilen (ShareLink)
-    static func tempFile(_ text: String, name: String) -> URL? {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        return (try? text.data(using: .utf8)?.write(to: url)) != nil ? url : nil
-    }
 }
 
 /// Creates a stable snapshot of reviewed classifier crops only when the user exports them.
