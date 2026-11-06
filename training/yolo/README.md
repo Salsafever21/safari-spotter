@@ -20,10 +20,22 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    ```
 2. **Auto-Labeln**: Der vorhandene COCO-Detektor zeichnet die Rahmen, die Art kommt aus dem Ordnernamen.
    ```
-   cd training && npm install && node yolo/autolabel.js
+   cd training && ./setup_node_mac.sh && node yolo/autolabel.js
    ```
-   Ergebnis: `training/yolo/dataset/{images,labels}/{train,val}` (Bilder als Symlinks, 15 % Validierung, deterministisch
-   nach Dateiname), `dataset.yaml` (mit absolutem Pfad, also auf dem Rechner ausführen, der auch trainiert) und `classes.json`.
+   Ergebnis: `training/yolo/dataset/{images,labels}/{train,val}` (Bilder als Symlinks, 15 % Validierung, gruppiert nach
+   iNaturalist-Beobachtung bzw. Original-JPEG einer Korrektur), `dataset.yaml` (mit absolutem Pfad, also auf dem Rechner
+   ausführen, der auch trainiert) und `classes.json`. Eingelesen werden nur Bilder mit aktivem Manifest-Eintrag und
+   CC0-/CC-BY-Lizenz oder geprüfter Korrektur; ersetzte Beschriftungen und verwaiste Bilddateien bleiben draussen.
+   Ein und dieselbe iNaturalist-Foto-ID oder Korrekturquelle in mehreren Artordnern wird wegen des widersprüchlichen
+   Labels aus beiden Trainingspfaden ausgeschlossen; die Quelldateien bleiben erhalten.
+   Ein erneuter Lauf erhält bestehende, auch manuell überarbeitete Labeldateien. `--overwrite` erzeugt sie bewusst neu;
+   bei geänderter Klassenreihenfolge stoppt das Skript, damit alte Labelnummern nicht falsch verwendet werden.
+   Wird eine Korrektur später ersetzt, entfernt der nächste Lauf nur ihre alte Bildverknüpfung aus dem Datensatz und
+   verschiebt das bisherige Label nach `dataset/excluded/`. Das Originalbild und die alte Beschriftung bleiben erhalten.
+   `dataset/label-review.json` listet Bilder mit Rückfall-Box und Bildern mit mehreren Tier-Boxen zur gezielten Sichtprüfung.
+   Vor dem Trainieren prüft `node yolo/audit_dataset.js` alle Bildverknüpfungen, Labelwerte, Lizenz-/Quelleneinträge,
+   Beobachtungsgruppen und die Mindestmenge je Klasse (20 Train, 3 Val). Für einen Probelauf mit `--limit` geht
+   `node yolo/audit_dataset.js --partial`; `train_mac.sh` verlangt den vollständigen erfolgreichen Audit.
    Die vier Klassen Hausrind, Hausziege, Haushund und Esel werden mit leeren Labels als Gegenbeispiele aufgenommen.
    Probelauf: `node yolo/autolabel.js --limit 20`.
 
@@ -52,7 +64,8 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    cp -R training/yolo/runs/spotter-yolo11n/weights/best.mlpackage ios/Models/SafariSpotterYolo.mlpackage
    cd ios && xcodegen generate
    ```
-   `project.yml` nimmt alle `.mlpackage` in `ios/Models` auf. `VisionPipeline` lädt `SafariSpotterYolo.mlmodelc` zur Laufzeit,
+   In `ios/project.yml` muss zusätzlich die dort kommentierte Dateireferenz für `SafariSpotterYolo.mlpackage` aktiviert
+   werden. `VisionPipeline` lädt `SafariSpotterYolo.mlmodelc` zur Laufzeit,
    wenn es im Bundle liegt, und schaltet automatisch um: Rahmen und Art kommen dann aus dem Detektor
    (`Detection.species`, `Tracker.applyDetectorSpecies`), der Artenkopf bleibt als zweite Meinung für schwache Treffer,
    die Fernerkennung (Kacheln) funktioniert unverändert. Ohne die Datei baut und läuft die App wie bisher.

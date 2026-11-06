@@ -23,7 +23,7 @@ Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanif
 ## Artenmodell neu trainieren
 
 ```
-cd training && npm install
+cd training && ./setup_node_mac.sh  # Apple-Silicon-Mac: TensorFlow auch bei Leerzeichen im Projektpfad
 python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY), Liste in species.json
 python3 import_corrections.py /Pfad/zu/korrekturen.json  # optional: geprüfte Ausschnitte aus der App (Pillow nötig)
 node embed.js                  # MobileNet-Embeddings mit demselben Graph wie im Browser

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const tf = require('@tensorflow/tfjs-node');
+const { isValidation } = require('./dataset');
 
 const SITE = path.resolve(__dirname, '..');
 const EMB = path.resolve(process.argv[2] || path.join(__dirname, 'embeddings.json'));
@@ -18,9 +19,8 @@ const items = raw.items;
 if (all.length !== items.length * dim) throw new Error('Embedding-Datei passt nicht zum Index: ' + all.length + ' vs ' + items.length * dim);
 
 // Split nach Beobachtung (alle Varianten eines Fotos landen auf derselben Seite), 15 % Validierung
-function hash(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
 const trainIdx = [], valIdx = [];
-items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (hash(it.obs || it.file) < 0.15 ? valIdx : trainIdx).push(i); });
+items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (isValidation(it.obs, it.file) ? valIdx : trainIdx).push(i); });
 // Validierung nur mit der ungespiegelten Vollbild-Variante (Variante 0), damit die Zahl realistisch bleibt
 const valIdx0 = valIdx.filter((i) => items[i].variant === 0);
 

@@ -111,7 +111,10 @@ def main():
         cdir = os.path.join(args.out, key)
         os.makedirs(cdir, exist_ok=True)
         # User corrections are additional examples, not a replacement for licensed iNaturalist photos.
-        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()])
+        # Count only photos already committed to the manifest. A stopped download can leave
+        # complete JPEGs on disk before the class manifest is written; the next run must revisit them.
+        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()
+                    and f"{key}/{f}" in manifest])
         if have >= args.per_class * 0.9:
             print(f'{key:22s} schon {have} Bilder, übersprungen'); continue
         try:
@@ -135,7 +138,8 @@ def main():
         with open(manifest_temp, 'w') as output:
             json.dump(manifest, output, ensure_ascii=False)
         os.replace(manifest_temp, manifest_path)
-        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()])
+        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()
+                     and f"{key}/{f}" in manifest])
         print(f'{key:22s} taxon {tid} ({tname}, {n_obs} Beob.)  gelistet {len(items):3d}  geladen {ok:3d}  total {total:3d}', flush=True)
     pool.shutdown()
 

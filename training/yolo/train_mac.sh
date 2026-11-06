@@ -12,6 +12,7 @@ test -f "$HERE/dataset.yaml" || { echo "dataset.yaml fehlt: zuerst  cd .. && nod
 YOLO_BIN="$HERE/../.venv/bin/yolo"
 if ! test -x "$YOLO_BIN"; then YOLO_BIN=$(command -v yolo || true); fi
 test -n "$YOLO_BIN" || { echo "yolo fehlt: uv venv ../.venv --python 3.11 && uv pip install --python ../.venv/bin/python ultralytics coremltools"; exit 1; }
+node "$HERE/audit_dataset.js"
 
 # 1) Training. MPS = Apple-GPU; auf Intel-Macs device=cpu. Ein yolo11n mit 16k Bildern braucht auf einem M-Chip grob 1 bis 3 Stunden.
 "$YOLO_BIN" detect train data="$HERE/dataset.yaml" model="$MODEL.pt" epochs="$EPOCHS" imgsz="$IMGSZ" batch="$BATCH" device=mps \

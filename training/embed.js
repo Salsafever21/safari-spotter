@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const tf = require('@tensorflow/tfjs-node');
 const mobilenet = require('@tensorflow-models/mobilenet');
+const { eligibleFiles } = require('./dataset');
 
 const SITE = path.resolve(__dirname, '..');
 const DATA = path.resolve(process.argv[2] || path.join(__dirname, 'data'));
@@ -52,10 +53,8 @@ function variants(img) {
   for (const c of spec.classes) {
     const dir = path.join(DATA, c.key);
     if (!fs.existsSync(dir)) { console.log('fehlt:', c.key); continue; }
-    // A correction image is usable only after its label has been committed to manifest.json.
-    // This also ignores an orphaned JPEG if an import was interrupted before the manifest write.
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg') &&
-      (!f.startsWith('correction-') || (manifest[c.key + '/' + f] && !manifest[c.key + '/' + f].superseded))).sort();
+    // Only licensed or user-reviewed images with an active manifest entry reach either model.
+    const files = eligibleFiles(dir, c.key, manifest);
     let okFiles = 0;
     for (const f of files) {
       let img;
