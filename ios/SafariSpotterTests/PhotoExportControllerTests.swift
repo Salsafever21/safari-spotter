@@ -6,6 +6,28 @@ final class PhotoExportControllerTests: StoreTestCase {
     private enum Failure: Error { case interrupted }
 
     @MainActor
+    func testUnreadableProtectionDataStopsAllWritesAndCannotBeSkipped() async throws {
+        let selected = addPhoto(species: ["Elefant"], sightingIds: [])
+        let other = addPhoto(species: ["Leopard"], sightingIds: [])
+        other.detsJSON = Data([0, 1, 2])
+        try context.save()
+        var writes = 0
+        let exporter = PhotoExportController { _, _, _ in writes += 1 }
+        exporter.start(photos: [selected], context: context, catalog: catalog)
+        await exporter.waitUntilIdle()
+        XCTAssertEqual(writes, 0, "Ein unlesbarer Schutzkontext muss vor jedem Schreiben abbrechen")
+        XCTAssertTrue(exporter.hasPendingJob)
+        XCTAssertTrue(exporter.canRetry)
+        XCTAssertFalse(exporter.canSkip)
+        XCTAssertFalse(exporter.skipFailedPhoto(), "Überspringen darf den Schutzkontext nicht umgehen")
+        XCTAssertEqual(exporter.completed, 0)
+        XCTAssertEqual(exporter.remainingCount, 1)
+        XCTAssertTrue(exporter.lastError?.contains("Artenschutz-Informationen") == true)
+        XCTAssertEqual(other.detsJSON, Data([0, 1, 2]))
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<PhotoItem>()), 2)
+    }
+
+    @MainActor
     func testRapidStartsDoNotDuplicatePhotosAndEmptyStartDoesNotResetResult() async {
         let first = addPhoto(species: ["Elefant"], sightingIds: [])
         let second = addPhoto(species: ["Leopard"], sightingIds: [])
@@ -15,6 +37,7 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertTrue(exporter.isRunning, "Der Schutz muss vor dem ersten Task-Wechsel aktiv sein")
         XCTAssertFalse(exporter.start(photos: [first], context: context, catalog: catalog))
         XCTAssertFalse(exporter.retry())
+        XCTAssertFalse(exporter.skipFailedPhoto(), "Laufende Exporte sind nicht überspringbar")
         XCTAssertFalse(exporter.discardFailedJob(), "Ein laufender Auftrag darf nicht freigegeben werden")
         await exporter.waitUntilIdle()
         XCTAssertEqual(writes, [first.id, second.id])
@@ -45,6 +68,7 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertEqual(exporter.savedIDs, [first.id])
         XCTAssertNotNil(exporter.lastError)
         XCTAssertTrue(exporter.canRetry)
+        XCTAssertFalse(exporter.canSkip, "Ein allgemeiner Schreibfehler darf nicht versehentlich übersprungen werden")
         XCTAssertFalse(exporter.canStart)
         XCTAssertFalse(exporter.start(photos: [third], context: context, catalog: catalog), "Ein Einzelbild darf die offene Restliste nicht ersetzen")
         XCTAssertEqual(exporter.remainingCount, 2)
@@ -88,6 +112,61 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertFalse(exporter.canRetry, "Wiederholen kann ein gelöschtes Foto nicht wiederherstellen")
         XCTAssertTrue(exporter.hasPendingJob)
         XCTAssertFalse(exporter.canStart)
+        XCTAssertTrue(exporter.canSkip)
+    }
+
+    @MainActor
+    func testSkippingBrokenPhotoContinuesBatchAndKeepsItsPrivacyContextAndOriginal() async throws {
+        let first = addPhoto(species: ["Elefant"], sightingIds: [])
+        let broken = addPhoto(species: ["Breitmaulnashorn"], sightingIds: [])
+        let last = addPhoto(species: ["Leopard"], sightingIds: [])
+        broken.image = Data([0, 1, 2])
+        last.t = broken.t.addingTimeInterval(180)
+        try context.save()
+        var attempts: [UUID] = []
+        let exporter = PhotoExportController { photo, times, catalog in
+            attempts.append(photo.id)
+            if photo.id == broken.id { throw PhotoExporter.ExportError.invalidImage }
+            if photo.id == last.id {
+                XCTAssertTrue(PhotoExporter.requiresProtection(for: photo, isSensitive: catalog.isSensitive, protectedTimes: times),
+                              "Auch das übersprungene Nashorn muss seine Nachbarfotos weiterhin schützen")
+            }
+        }
+        exporter.start(photos: [first, broken, last], context: context, catalog: catalog)
+        await exporter.waitUntilIdle()
+        XCTAssertTrue(exporter.canSkip)
+        XCTAssertEqual(exporter.completed, 1)
+        XCTAssertTrue(exporter.skipFailedPhoto())
+        XCTAssertFalse(exporter.skipFailedPhoto(), "Die fortgesetzte Serie darf nicht nochmals übersprungen werden")
+        await exporter.waitUntilIdle()
+        XCTAssertEqual(attempts, [first.id, broken.id, last.id])
+        XCTAssertEqual(exporter.savedIDs, [first.id, last.id])
+        XCTAssertEqual(exporter.skippedIDs, [broken.id])
+        XCTAssertEqual(exporter.completed, 2)
+        XCTAssertEqual(exporter.total, 3)
+        XCTAssertTrue(exporter.canStart)
+        XCTAssertNil(exporter.lastError)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<PhotoItem>()), 3)
+        XCTAssertEqual(broken.image, Data([0, 1, 2]))
+    }
+
+    @MainActor
+    func testSkippingOnlyRemainingPhotoFinishesWithoutClaimingItWasSaved() async {
+        let photo = addPhoto(species: ["Leopard"], sightingIds: [])
+        let exporter = PhotoExportController { _, _, _ in throw PhotoExporter.ExportError.metadata }
+        exporter.start(photos: [photo], context: context, catalog: catalog)
+        await exporter.waitUntilIdle()
+        XCTAssertTrue(exporter.skipFailedPhoto())
+        XCTAssertEqual(exporter.completed, 0)
+        XCTAssertEqual(exporter.skippedIDs, [photo.id])
+        XCTAssertTrue(exporter.savedIDs.isEmpty)
+        XCTAssertEqual(exporter.remainingCount, 0)
+        XCTAssertFalse(exporter.hasPendingJob)
+        XCTAssertFalse(exporter.canSkip)
+        XCTAssertTrue(exporter.canStart)
+        exporter.start(photos: [photo], context: context, catalog: catalog)
+        XCTAssertTrue(exporter.skippedIDs.isEmpty, "Ein neuer Auftrag beginnt ohne alte Überspringen-Zählung")
+        await exporter.waitUntilIdle()
     }
 
     @MainActor

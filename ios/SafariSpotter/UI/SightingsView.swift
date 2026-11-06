@@ -233,6 +233,7 @@ struct GalleryView: View {
                             Text(p.species.first ?? (p.kind == "photo" ? "Bild" : "Foto")).font(.caption.bold()).padding(6).shadow(radius: 3)
                         }.frame(height: 110).clipShape(RoundedRectangle(cornerRadius: 10))
                     }
+                    .accessibilityIdentifier("gallery-photo-\(p.id.uuidString)")
                 }
             }.padding(.horizontal)
             HStack {
@@ -294,7 +295,7 @@ struct PhotoViewer: View {
             HStack {
                 Button(exporter.savedIDs.contains(current.id) ? "Erneut sichern" : "In Fotos sichern") {
                     exporter.start(photos: [current], context: context, catalog: catalog)
-                }.buttonStyle(.borderedProminent).disabled(!exporter.canStart)
+                }.buttonStyle(.borderedProminent).disabled(!exporter.canStart).accessibilityIdentifier("photo-save-current")
                 Button(boxes ? "Rahmen aus" : "Rahmen ein") { boxes.toggle() }.buttonStyle(.bordered)
                 Button("Löschen", role: .destructive) { confirmDelete = true }.buttonStyle(.bordered)
                     .disabled(exporter.isRunning)

@@ -13,6 +13,7 @@ final class PhotoExportController: ObservableObject {
     @Published private(set) var completed = 0
     @Published private(set) var currentID: UUID?
     @Published private(set) var savedIDs: Set<UUID> = []
+    @Published private(set) var skippedIDs: Set<UUID> = []
     @Published private(set) var lastError: String?
     @Published private var retryBlocked = false
     private var remaining: [UUID] = []
@@ -23,6 +24,7 @@ final class PhotoExportController: ObservableObject {
 
     var hasPendingJob: Bool { !isRunning && !remaining.isEmpty && lastError != nil }
     var canRetry: Bool { hasPendingJob && !retryBlocked }
+    var canSkip: Bool { hasPendingJob && retryBlocked }
     var canStart: Bool { !isRunning && !hasPendingJob }
     var remainingCount: Int { remaining.count }
 
@@ -37,7 +39,7 @@ final class PhotoExportController: ObservableObject {
         let ids = photos.map(\.id).filter { seen.insert($0).inserted }
         guard !ids.isEmpty else { return false }
         self.context = context; self.catalog = catalog
-        remaining = ids; total = ids.count; completed = 0; savedIDs = []
+        remaining = ids; total = ids.count; completed = 0; savedIDs = []; skippedIDs = []
         return launch()
     }
 
@@ -47,12 +49,25 @@ final class PhotoExportController: ObservableObject {
         return launch()
     }
 
+    /// Ausdrückliche Nutzerentscheidung nach einem bildbezogenen Fehler. Ein Schutz-Lesefehler ist nicht überspringbar.
+    @discardableResult
+    func skipFailedPhoto() -> Bool {
+        guard canSkip, let id = remaining.first else { return false }
+        remaining.removeFirst(); skippedIDs.insert(id)
+        lastError = nil; retryBlocked = false
+        if remaining.isEmpty {
+            context = nil; catalog = nil; task = nil
+            return true
+        }
+        return launch()
+    }
+
     /// Nur den fehlgeschlagenen Auftrag beenden, niemals Originalfotos oder gesicherte Mediathek-Kopien entfernen.
     @discardableResult
     func discardFailedJob() -> Bool {
         guard hasPendingJob else { return false }
         remaining = []; context = nil; catalog = nil; task = nil
-        total = 0; completed = 0; savedIDs = []; lastError = nil; retryBlocked = false
+        total = 0; completed = 0; savedIDs = []; skippedIDs = []; lastError = nil; retryBlocked = false
         return true
     }
 
@@ -78,7 +93,9 @@ final class PhotoExportController: ObservableObject {
                 // Ein gelöschtes oder nicht kodierbares Foto wird durch erneutes Tippen nicht wiederhergestellt.
                 if error is ExportError { retryBlocked = true }
                 if case .metadata? = error as? PhotoExporter.ExportError { retryBlocked = true }
-                lastError = "\(completed) von \(total) Fotos gesichert. \(error.localizedDescription)"
+                if case .invalidImage? = error as? PhotoExporter.ExportError { retryBlocked = true }
+                lastError = "\(completed) von \(total) Fotos gesichert. "
+                    + (skippedIDs.isEmpty ? "" : "\(skippedIDs.count) übersprungen. ") + error.localizedDescription
             }
         }
         return true
@@ -89,6 +106,6 @@ final class PhotoExportController: ObservableObject {
 
     enum ExportError: LocalizedError {
         case missingPhoto
-        var errorDescription: String? { "Ein noch offenes Foto ist nicht mehr in der App vorhanden. Beende diesen Exportauftrag, bevor du eine neue Auswahl sicherst." }
+        var errorDescription: String? { "Ein noch offenes Foto ist nicht mehr in der App vorhanden. Du kannst es überspringen oder diesen Exportauftrag beenden." }
     }
 }

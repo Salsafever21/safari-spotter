@@ -42,6 +42,9 @@ private enum StorageLaunch {
             if ProcessInfo.processInfo.environment["SAFARI_SPOTTER_UI_FIXTURE"] == "drive-history" {
                 return .ready(try DriveHistoryFixture.make())
             }
+            if ProcessInfo.processInfo.environment["SAFARI_SPOTTER_UI_FIXTURE"] == "photo-export-failure" {
+                return .ready(try DriveHistoryFixture.make(corruptPhoto: true))
+            }
             #endif
             return .ready(try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self))
         }

@@ -4,7 +4,7 @@ import UIKit
 
 /// Ausschliesslich für einen expliziten UI-Teststart; öffnet oder verändert keinen persistenten Datenspeicher.
 enum DriveHistoryFixture {
-    static func make() throws -> ModelContainer {
+    static func make(corruptPhoto: Bool = false) throws -> ModelContainer {
         let container = try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self,
                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
@@ -19,9 +19,12 @@ enum DriveHistoryFixture {
             let sighting = Sighting(name: name, key: key, t: start.addingTimeInterval(120),
                                     position: Position(lat: -24.9, lon: 31.5, acc: 5, coarse: false))
             context.insert(sighting)
-            context.insert(try PhotoItem(t: start.addingTimeInterval(120), kind: "auto", species: [name], dets: [],
+            let photo = try PhotoItem(t: start.addingTimeInterval(120), kind: "auto", species: [name], dets: [],
                                          image: image, thumb: image, width: 80, height: 80,
-                                         position: Position(lat: -24.9, lon: 31.5, acc: 5, coarse: false), sightingIds: [sighting.id]))
+                                         position: Position(lat: -24.9, lon: 31.5, acc: 5, coarse: false), sightingIds: [sighting.id])
+            photo.id = UUID(uuidString: id)!
+            if corruptPhoto && name == "Leopard" { photo.image = Data([0, 1, 2]) }
+            context.insert(photo)
             let points = [TrackPoint(t: start.timeIntervalSince1970, lat: -24.91, lon: 31.5, spd: 4, alt: 300),
                           TrackPoint(t: start.timeIntervalSince1970 + 120, lat: -24.9, lon: 31.5, spd: 0, alt: 305),
                           TrackPoint(t: start.timeIntervalSince1970 + 240, lat: -24.9, lon: 31.5, spd: 0, alt: 305)]

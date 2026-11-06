@@ -30,10 +30,15 @@ Einzelbild und Galerie verwenden denselben Fotoexport-Auftrag. Er zeigt den Fort
 und sperrt das Löschen von Fotos, solange er läuft. Nach einem Fehler können nur die noch nicht erfolgreich gesicherten
 Fotos erneut versucht werden. Der Auftrag bleibt beim Wechsel der Ansicht erhalten; er wird nach einem vollständigen
 Beenden der App nicht automatisch fortgesetzt. Ein neuer Auftrag kann die offene Restliste nicht ersetzen: Zuerst
-wiederholen oder den offenen Export ausdrücklich beenden. Bei einem inzwischen gelöschten oder nicht kodierbaren Foto
-wird kein wirkungsloser Wiederholen-Knopf angeboten. Das Beenden eines Auftrags entfernt keine Originale oder Mediathek-Kopien.
+wiederholen oder den offenen Export ausdrücklich beenden. Bei einem inzwischen gelöschten oder nicht lesbaren bzw.
+kodierbaren Foto kann dieses nach Bestätigung übersprungen werden; die übrigen Fotos werden weiter gesichert.
+Übersprungene Fotos werden getrennt gezählt und nie als Sicherungserfolg angezeigt. Sie bleiben im Datenspeicher
+und im Artenschutz-Kontext. Das Beenden eines Auftrags entfernt keine Originale oder Mediathek-Kopien.
 Erfolgsmeldungen im Bildbetrachter gehören zur ID des gesicherten Fotos.
 **Erneut sichern** erzeugt auf ausdrücklichen Wunsch eine weitere Kopie in der Mediathek. Die App-Originale bleiben erhalten.
+Die Bildaufbereitung verarbeitet unveränderliche Kopien ausserhalb des Main Actors; SwiftData-Objekte verlassen ihren
+Actor nicht. Ein unlesbares Bild wird vor der Fotos-Berechtigungsanfrage erkannt. Beschädigte Artenschutz-Metadaten
+im gesamten Speicher stoppen den Export und können nicht über die Überspringen-Funktion umgangen werden.
 
 Unter **Sichtungen → Karte** zeigt die Gesamtkarte alle Aufnahmen. Jede gespeicherte Fahrt lässt sich separat öffnen:
 Route, Statistik, Stopps, Kilometer-Splits, Sichtungen und Fotos werden für ihren gespeicherten Zeitraum angezeigt.
@@ -48,13 +53,13 @@ Bilddatei wird ohne Quell-Metadaten neu geschrieben, damit keine zweite ursprün
 Das gilt auch für andere Tierfotos innerhalb von 15 Minuten um geschützte Sichtungen oder Fotos. Vor Einzel- und
 Sammelexporten wird der Schutzkontext aus dem gesamten Datenspeicher gelesen, auch im Foto-Viewer einer einzelnen Fahrt.
 Bei einem Lesefehler wird der Export mit einer Meldung abgebrochen. Die gespeicherten Originalfotos werden nicht verändert.
-Verifiziert am 6. November 2026 mit Xcode 27.2: 101 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
+Verifiziert am 6. November 2026 mit Xcode 27.2: 110 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
 mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
 die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8
-enthält weitere Datenschutz- und Speicherverbesserungen; die TestFlight-Bereitstellung folgt nach Sandros Rückkehr.
+enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen; seine TestFlight-Bereitstellung steht noch aus.
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.
@@ -346,9 +351,10 @@ xcrun swift ios/Tools/model-check/main.swift ios/Models/SafariSpotterSpecies.mlp
 
 - **Gerätetest**: Der Tracking-Fix aus Build 4 und der Sicherungsweg aus Build 6 wurden auf dem iPhone bestätigt. Die
   Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
-- **Fotoexport auf dem Gerät**: Mediathek-Fehler mitten in einer Serie und Hintergrundwechsel beim Schreiben sind noch
-  mit dem iPhone zu prüfen. Die Bildaufbereitung läuft derzeit auf dem Main Actor; grosse Serien könnten die Oberfläche
-  kurz verzögern. Die automatisierten Teilfehler-Tests verwenden einen kontrollierten Schreiber ohne Mediathekzugriff.
+- **Fotoexport auf dem Gerät**: Mediathek-Fehler mitten in einer Serie, Hintergrundwechsel beim Schreiben und die
+  Reaktionszeit grosser Fotoserien sind noch mit dem iPhone zu prüfen. Die automatisierten Teilfehler-Tests verwenden
+  einen kontrollierten Schreiber ohne Mediathekzugriff. Ein UI-Test prüft den tatsächlichen Bildfehler vor der
+  Berechtigungsanfrage, die Überspringen-Bestätigung und den Erhalt des Originals mit einem flüchtigen Testdatensatz.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
   mit echten Tieraufnahmen vermessen. Die Trainingsbilder für das vorbereitete YOLO-Modell liegen derzeit nicht im Repository.
   Geprüfte Korrekturbilder aus der App lassen sich lokal mit `training/import_corrections.py` in den Artenkopf-Datensatz

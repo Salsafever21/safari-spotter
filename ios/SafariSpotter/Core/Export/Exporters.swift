@@ -29,8 +29,10 @@ enum Exporters {
     /// Vor Fotoexporten immer den gesamten Speicher lesen; ein Lesefehler darf keinen ungeschützten Export ergeben.
     @MainActor
     static func protectedTimes(context: ModelContext, catalog: SpeciesCatalog) throws -> [TimeInterval] {
-        protectedTimes(sightings: try context.fetch(FetchDescriptor<Sighting>()),
-                       photos: try context.fetch(FetchDescriptor<PhotoItem>()), catalog: catalog)
+        let sightings = try context.fetch(FetchDescriptor<Sighting>())
+        let photos = try context.fetch(FetchDescriptor<PhotoItem>())
+        try PhotoExporter.validateProtectionData(photos)
+        return protectedTimes(sightings: sightings, photos: photos, catalog: catalog)
     }
 
     static func csv(sightings: [Sighting], catalog: SpeciesCatalog,
@@ -165,13 +167,22 @@ enum PhotoExporter {
     }
 
     enum ExportError: LocalizedError {
-        case denied, metadata
+        case denied, metadata, invalidImage, protectionData
         var errorDescription: String? {
             switch self {
             case .denied: return "Kein Zugriff auf die Fotos-Mediathek. Bitte in den Einstellungen unter Safari Spotter › Fotos „Nur hinzufügen“ erlauben."
             case .metadata: return "Die Bildinformationen konnten nicht sicher geschrieben werden; das Foto wurde nicht gesichert."
+            case .invalidImage: return "Das Bild kann für diesen Export nicht gelesen werden. Das Original bleibt in der App erhalten."
+            case .protectionData: return "Die Artenschutz-Informationen eines gespeicherten Fotos können nicht gelesen werden. Der Export wurde gestoppt. Die Originale bleiben erhalten."
             }
         }
+    }
+
+    /// Der UI-Rückfall `dets == []` ist für Exporte unzulässig: beschädigte Rahmen könnten ein Nashorn verbergen.
+    @MainActor
+    static func validateProtectionData(_ photos: [PhotoItem]) throws {
+        do { for photo in photos { _ = try photo.decodedDets() } }
+        catch { throw ExportError.protectionData }
     }
 
     /// Exportposition: schon vergröbert bleibt, sensible Art in Artenliste **oder** Rahmen → 10-km-Raster, sonst genau
@@ -252,17 +263,18 @@ enum PhotoExporter {
     @MainActor
     static func export(_ photo: PhotoItem, isSensitive: (String) -> Bool,
                         protectedTimes: [TimeInterval]) async throws {
-        let coordinate = exportCoordinate(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
-        let date = exportDate(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
-        let jpeg = jpegWithMetadata(photo.image, date: date, coordinate: coordinate, description: "Safari Spotter: " + photo.species.joined(separator: ", "),
-                                    stripSourceMetadata: requiresProtection(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes))
-        guard !jpeg.isEmpty else { throw ExportError.metadata }
+        try validateProtectionData([photo])
+        let input = snapshot(photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
+        let prepared = try await prepareInBackground(input)
         guard await requestAddAccess() else { throw ExportError.denied }
+        try Task.checkCancellation()
         try await PHPhotoLibrary.shared().performChanges {
             let req = PHAssetCreationRequest.forAsset()
-            req.addResource(with: .photo, data: jpeg, options: nil)
-            req.creationDate = date
-            if let c = coordinate { req.location = CLLocation(latitude: c.latitude, longitude: c.longitude) }
+            req.addResource(with: .photo, data: prepared.jpeg, options: nil)
+            req.creationDate = prepared.date
+            if let latitude = prepared.latitude, let longitude = prepared.longitude {
+                req.location = CLLocation(latitude: latitude, longitude: longitude)
+            }
         }
     }
 }
