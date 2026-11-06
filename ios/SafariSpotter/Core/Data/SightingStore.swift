@@ -11,8 +11,13 @@ struct SightingStore {
     let fetchPhotos: (ModelContext) throws -> [PhotoItem]
 
     enum StoreError: LocalizedError {
-        case newSightingFailed
-        var errorDescription: String? { "Korrigierte Sichtung konnte nicht gespeichert werden" }
+        case newSightingFailed, invalidCount
+        var errorDescription: String? {
+            switch self {
+            case .newSightingFailed: "Korrigierte Sichtung konnte nicht gespeichert werden"
+            case .invalidCount: "Die Anzahl muss mindestens eins sein. Zum Entfernen bitte die Sichtung ausdrücklich löschen."
+            }
+        }
     }
 
     init(context: ModelContext, isSensitive: @escaping (String) -> Bool,
@@ -33,6 +38,14 @@ struct SightingStore {
 
     func sighting(id: UUID) throws -> Sighting? {
         try context.fetch(FetchDescriptor<Sighting>(predicate: #Predicate { $0.id == id })).first
+    }
+
+    /// Zählen löscht keinen Datensatz. Ein Schreibfehler stellt die zuvor gespeicherte Anzahl wieder her.
+    func setCount(_ count: Int, for sighting: Sighting) throws {
+        guard count >= 1 else { throw StoreError.invalidCount }
+        sighting.n = count
+        do { try saveContext(context) }
+        catch { context.rollback(); throw error }
     }
 
     /// Fotos, die auf eine Sichtung verweisen. Im Speicher gefiltert: Prädikate auf Array-Attributen sind in SwiftData unzuverlässig.

@@ -249,6 +249,7 @@ enum PhotoExporter {
     }
 
     /// Foto mit geschützter Position, Datum und Artnamen in die Mediathek sichern
+    @MainActor
     static func export(_ photo: PhotoItem, isSensitive: (String) -> Bool,
                         protectedTimes: [TimeInterval]) async throws {
         let coordinate = exportCoordinate(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)

@@ -1,6 +1,39 @@
 import XCTest
 
 final class SightingHistoryUITests: XCTestCase {
+    func testCountingStopsAtOneAndDeletionRequiresConfirmationWithoutDeletingPhotos() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SAFARI_SPOTTER_UI_FIXTURE"] = "drive-history"
+        app.launchAndCompleteTravelSetupIfNeeded()
+        let open = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sichtungen")).firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
+        let count = app.steppers["sighting-count-Leopard"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
+        let decrease = count.buttons.element(boundBy: 0)
+        let increase = count.buttons.element(boundBy: 1)
+        XCTAssertEqual(count.value as? String, "1")
+        decrease.tap()
+        XCTAssertEqual(count.value as? String, "1", "Minus bei eins darf weder löschen noch die Anzahl ändern")
+        increase.tap()
+        XCTAssertEqual(count.value as? String, "2")
+        decrease.tap()
+        XCTAssertEqual(count.value as? String, "1")
+        XCTAssertTrue(app.buttons["Leopard"].exists)
+
+        app.buttons["Leopard"].swipeLeft()
+        app.buttons["sighting-delete-Leopard"].tap()
+        XCTAssertTrue(app.buttons["Sichtung löschen"].waitForExistence(timeout: 5))
+        app.buttons["Abbrechen"].tap()
+        XCTAssertTrue(app.buttons["Leopard"].exists)
+        app.buttons["Leopard"].swipeLeft()
+        app.buttons["sighting-delete-Leopard"].tap()
+        let image = XCTAttachment(screenshot: app.screenshot())
+        image.name = "Sichtung ausdrücklich löschen, Fotos behalten"; image.lifetime = .keepAlways; add(image)
+        app.buttons["Sichtung löschen"].tap()
+        XCTAssertFalse(app.buttons["Leopard"].exists)
+        XCTAssertTrue(app.buttons["Galerie 2"].exists, "Die Fotos bleiben nach dem Löschen der Sichtung erhalten")
+    }
+
     func testDateAndSpeciesFiltersCanAlwaysReturnToAllSavedSightings() {
         let app = XCUIApplication()
         app.launchEnvironment["SAFARI_SPOTTER_UI_FIXTURE"] = "drive-history"

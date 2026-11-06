@@ -6,6 +6,35 @@ import SwiftData
 final class SightingStoreFailureTests: StoreTestCase {
     private enum SimulatedFailure: Error { case unavailable }
 
+    func testCountCannotDeleteSightingOrLinkedPhoto() throws {
+        let sighting = addSighting("Elefant")
+        let photo = addPhoto(species: ["Elefant"], sightingIds: [sighting.id])
+        XCTAssertThrowsError(try store.setCount(0, for: sighting))
+        XCTAssertThrowsError(try store.setCount(-1, for: sighting))
+        XCTAssertEqual(try store.sighting(id: sighting.id)?.n, 1)
+        try store.setCount(3, for: sighting)
+        try store.setCount(1, for: sighting)
+        XCTAssertEqual(try store.sighting(id: sighting.id)?.n, 1)
+        XCTAssertEqual(try store.photos(linkedTo: sighting.id).map(\.id), [photo.id])
+    }
+
+    func testFailedCountChangeRollsBackPreviousCount() throws {
+        let sighting = addSighting("Impala", n: 2)
+        let failing = SightingStore(context: context, catalog: catalog,
+                                    saveContext: { _ in throw SimulatedFailure.unavailable })
+        XCTAssertThrowsError(try failing.setCount(1, for: sighting))
+        XCTAssertEqual(try store.sighting(id: sighting.id)?.n, 2)
+    }
+
+    func testExplicitSightingRemovalPreservesPhoto() throws {
+        let sighting = addSighting("Leopard")
+        let photo = addPhoto(species: ["Leopard"], sightingIds: [sighting.id])
+        let id = sighting.id
+        try store.remove(sighting)
+        XCTAssertNil(try store.sighting(id: id))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PhotoItem>()).map(\.id), [photo.id])
+    }
+
     func testFailedRenameRollsBackSightingAndPhoto() throws {
         let sighting = addSighting("Elefant")
         let photo = addPhoto(species: ["Elefant"], sightingIds: [sighting.id])

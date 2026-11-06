@@ -23,6 +23,7 @@ struct SightingsView: View {
     @State private var profile: SpeciesClass?
     @State private var correction: CorrectionTarget?
     @State private var confirmClear = false
+    @State private var sightingToDelete: Sighting?
     @State private var storageError: String?
     @ObservedObject private var clipLibrary = ClipLibrary.shared
 
@@ -60,6 +61,17 @@ struct SightingsView: View {
                 }
             } message: {
                 Text("Sichere die Daten vorher in Einstellungen → Daten sichern.")
+            }
+            .alert("Sichtung löschen?", isPresented: Binding(
+                get: { sightingToDelete != nil }, set: { if !$0 { sightingToDelete = nil } }),
+                presenting: sightingToDelete) { sighting in
+                Button("Sichtung löschen", role: .destructive) {
+                    do { try SightingStore(context: context, catalog: catalog).remove(sighting) }
+                    catch { storageError = "Sichtung konnte nicht gelöscht werden: \(error.localizedDescription)" }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { sighting in
+                Text("\(sighting.name) (Anzahl: \(sighting.n)) entfernen? Zugehörige Fotos bleiben in der Galerie.")
             }
             .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
                 Button("OK") {}
@@ -153,11 +165,17 @@ struct SightingsView: View {
             }
             Spacer()
             Stepper("\(s.n)", value: Binding(get: { s.n }, set: { v in
-                if v <= 0 { context.delete(s) } else { s.n = v }
-                commit("Zählung speichern")
-            })).labelsHidden()
+                do { try SightingStore(context: context, catalog: catalog).setCount(v, for: s) }
+                catch { storageError = "Zählung konnte nicht gespeichert werden: \(error.localizedDescription)" }
+            }), in: 1...Int.max).labelsHidden()
+                .accessibilityLabel("\(s.name) zählen")
+                .accessibilityIdentifier("sighting-count-\(s.name)")
             Text("\(s.n)").monospacedDigit().frame(width: 28)
             Text(fmtTime(s.t)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .swipeActions(allowsFullSwipe: false) {
+            Button("Löschen", role: .destructive) { sightingToDelete = s }
+                .accessibilityIdentifier("sighting-delete-\(s.name)")
         }
     }
 
@@ -199,9 +217,9 @@ struct GalleryView: View {
     let catalog: SpeciesCatalog
     @Environment(\.modelContext) private var context
     @State private var viewer: PhotoItem?
-    @State private var busy = false
     @State private var exportError: String?
     @State private var confirmDelete = false
+    @ObservedObject private var exporter = PhotoExportController.shared
     @ObservedObject private var clipLibrary = ClipLibrary.shared
     var body: some View {
         ScrollView {
@@ -218,23 +236,19 @@ struct GalleryView: View {
                 }
             }.padding(.horizontal)
             HStack {
-                Button(busy ? "Sichere …" : "Alle in Fotos sichern") {
-                    Task {
-                        busy = true; defer { busy = false }
-                        do {
-                            let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
-                            for p in photos { try await PhotoExporter.export(p, isSensitive: catalog.isSensitive, protectedTimes: protectedTimes) }
-                        }
-                        catch { exportError = error.localizedDescription }
-                    }
-                }.disabled(busy || photos.isEmpty)
+                Button(exporter.isRunning ? "Sichere …" : "Alle in Fotos sichern") {
+                    exporter.start(photos: photos, context: context, catalog: catalog)
+                }.disabled(exporter.isRunning || photos.isEmpty)
                 Button("Alle löschen", role: .destructive) { confirmDelete = true }
+                    .disabled(exporter.isRunning || photos.isEmpty)
             }.buttonStyle(.bordered).padding()
+            PhotoExportStatusView(exporter: exporter).padding(.horizontal).padding(.bottom, 8)
             Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. Nashorn-Fotos und andere Fotos innerhalb von 15 Minuten erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
         .confirmationDialog("Alle Fotos aus der App löschen?", isPresented: $confirmDelete) {
             Button("Alle Fotos löschen", role: .destructive) {
+                guard !exporter.isRunning else { return }
                 photos.forEach { context.delete($0) }
                 do { try context.save() }
                 catch { context.rollback(); exportError = "Fotos konnten nicht gelöscht werden: \(error.localizedDescription)" }
@@ -252,9 +266,9 @@ struct PhotoViewer: View {
     @EnvironmentObject private var catalog: SpeciesCatalog
     @State private var index = 0
     @State private var boxes = true
-    @State private var saved = false
     @State private var exportError: String?
     @State private var confirmDelete = false
+    @ObservedObject private var exporter = PhotoExportController.shared
     var current: PhotoItem { photos.indices.contains(index) ? photos[index] : photo }
     var body: some View {
         VStack {
@@ -278,25 +292,22 @@ struct PhotoViewer: View {
                     .foregroundStyle(.orange).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
-                Button(saved ? "Gesichert" : "In Fotos sichern") {
-                    let item = current
-                    Task {
-                        do {
-                            let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
-                            try await PhotoExporter.export(item, isSensitive: catalog.isSensitive, protectedTimes: protectedTimes)
-                            saved = true
-                        }
-                        catch { exportError = error.localizedDescription }
-                    }
-                }.buttonStyle(.borderedProminent)
+                Button(exporter.savedIDs.contains(current.id) ? "Erneut sichern" : "In Fotos sichern") {
+                    exporter.start(photos: [current], context: context, catalog: catalog)
+                }.buttonStyle(.borderedProminent).disabled(exporter.isRunning)
                 Button(boxes ? "Rahmen aus" : "Rahmen ein") { boxes.toggle() }.buttonStyle(.bordered)
                 Button("Löschen", role: .destructive) { confirmDelete = true }.buttonStyle(.bordered)
+                    .disabled(exporter.isRunning)
             }.padding()
+            if exporter.savedIDs.contains(current.id) {
+                Text("Dieses Foto wurde in der Mediathek gesichert.").font(.caption).foregroundStyle(.secondary)
+            }
+            PhotoExportStatusView(exporter: exporter).padding(.horizontal).padding(.bottom)
         }
         .onAppear { index = photos.firstIndex { $0.id == photo.id } ?? 0 }
-        .onChange(of: index) { saved = false }
         .confirmationDialog("Dieses Foto aus der App löschen?", isPresented: $confirmDelete) {
             Button("Foto löschen", role: .destructive) {
+                guard !exporter.isRunning else { return }
                 context.delete(current)
                 do { try context.save(); dismiss() }
                 catch { context.rollback(); exportError = "Foto konnte nicht gelöscht werden: \(error.localizedDescription)" }
