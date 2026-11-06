@@ -96,7 +96,7 @@ func runVideoChecks() async {
     try? Data("xx".utf8).write(to: ClipFiles.movieURL(b, in: dir))
     expect(ClipFiles.load(b, in: dir)?.state == .recording && ClipFiles.load(b, in: dir)?.lat == nil, "dokumentiertes JSON (ohne Standort, ohne Vorschaubild) lesbar")
     try? Data("kaputt".utf8).write(to: dir.appendingPathComponent("\(UUID().uuidString).json"))
-    let listed = ClipFiles.list(in: dir)
+    let listed = (try? ClipFiles.list(in: dir)) ?? []
     expect(listed.map(\.id) == [b, a], "Liste: neueste zuerst, unlesbare JSON übersprungen")
 
     // Wiederherstellung nach Abbruch: b lief noch → abspielbar geprüft; Waise c ohne JSON → beschädigt; laufender Clip d unberührt
@@ -105,7 +105,7 @@ func runVideoChecks() async {
     var rd = ClipRecord(id: d, createdAt: Date(), burnedIn: false, trackingActive: false, state: .recording)
     rd.fileSize = 0
     try? ClipFiles.save(rd, in: dir)
-    expect(ClipFiles.orphanMovies(in: dir) == [c], "Video ohne Metadaten gefunden")
+    expect((try? ClipFiles.orphanMovies(in: dir)) == [c], "Video ohne Metadaten gefunden")
     let changed = await ClipFiles.recoverInterrupted(in: dir, excluding: d) { url in
         url.lastPathComponent.hasPrefix(b.uuidString) ? ClipProbe(duration: 3.0, width: 1080, height: 1920) : nil
     }

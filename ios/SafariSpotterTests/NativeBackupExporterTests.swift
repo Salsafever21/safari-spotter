@@ -177,7 +177,7 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertEqual(result.photos, 1)
         XCTAssertEqual(try newContext.fetch(FetchDescriptor<PhotoItem>()).first?.image, photo.image)
         XCTAssertEqual(try Data(contentsOf: ClipFiles.movieURL(clipID, in: restoredClips)), clipBytes)
-        XCTAssertEqual(ClipFiles.list(in: restoredClips).first?.id, clipID)
+        XCTAssertEqual(try ClipFiles.list(in: restoredClips).first?.id, clipID)
         XCTAssertEqual(try Data(contentsOf: result.archiveURL).prefix(6), Data("SSBE1\n".utf8))
     }
 }

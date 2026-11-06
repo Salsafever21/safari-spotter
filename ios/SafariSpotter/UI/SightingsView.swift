@@ -246,6 +246,7 @@ struct GalleryView: View {
             PhotoExportStatusView(exporter: exporter).padding(.horizontal).padding(.bottom, 8)
             Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. Nashorn-Fotos und andere Fotos innerhalb von 15 Minuten erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
+        .onAppear { clipLibrary.reload() }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
         .confirmationDialog("Alle Fotos aus der App löschen?", isPresented: $confirmDelete) {
             Button("Alle Fotos löschen", role: .destructive) {

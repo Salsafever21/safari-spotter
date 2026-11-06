@@ -62,6 +62,7 @@ struct ClipProbe: Equatable {
 struct ClipRecoveryReport {
     var changed: [ClipRecord] = []
     var failedIDs: [UUID] = []
+    var directoryError: String?
 }
 
 enum ClipFileError: LocalizedError, Equatable {
@@ -123,8 +124,8 @@ enum ClipFiles {
     }
 
     /// Alle lesbaren Clips, neueste zuerst. Unlesbare JSON-Dateien werden übersprungen, nie gelöscht.
-    static func list(in dir: URL) -> [ClipRecord] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    static func list(in dir: URL) throws -> [ClipRecord] {
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         return names.filter { $0.hasSuffix(".json") }
             .compactMap { name -> ClipRecord? in
                 guard let id = UUID(uuidString: String(name.dropLast(5))), let r = load(id, in: dir), r.id == id else { return nil }
@@ -134,8 +135,8 @@ enum ClipFiles {
     }
 
     /// Videodateien ohne lesbare Metadaten (Abbruch oder beschädigte JSON-Datei)
-    static func orphanMovies(in dir: URL) -> [UUID] {
-        let names = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+    static func orphanMovies(in dir: URL) throws -> [UUID] {
+        let names = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path))
         return names.filter { $0.hasSuffix(".mov") }
             .compactMap { UUID(uuidString: String($0.dropLast(4))) }
             .filter { id in load(id, in: dir)?.id != id }
@@ -152,7 +153,15 @@ enum ClipFiles {
     @discardableResult
     static func recoverInterrupted(in dir: URL, excluding active: UUID? = nil, probe: (URL) async -> ClipProbe?) async -> ClipRecoveryReport {
         var report = ClipRecoveryReport()
-        for var r in list(in: dir) where r.state == .recording && r.id != active {
+        let records: [ClipRecord], orphans: [UUID]
+        do {
+            records = try list(in: dir)
+            orphans = try orphanMovies(in: dir)
+        } catch {
+            report.directoryError = error.localizedDescription
+            return report
+        }
+        for var r in records where r.state == .recording && r.id != active {
             let url = movieURL(r.id, in: dir)
             if let p = await probe(url), p.duration > 0 {
                 r.state = .recovered; r.duration = p.duration; r.width = p.width; r.height = p.height
@@ -161,7 +170,7 @@ enum ClipFiles {
             do { try save(r, in: dir); report.changed.append(r) }
             catch { report.failedIDs.append(r.id) }
         }
-        for id in orphanMovies(in: dir) where id != active {
+        for id in orphans where id != active {
             let url = movieURL(id, in: dir)
             let created = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date) ?? Date()
             var r = ClipRecord(id: id, createdAt: created, burnedIn: false, trackingActive: false, state: .damaged)
@@ -185,6 +194,8 @@ enum ClipFiles {
 
     /// Clip vollständig löschen (Video, Metadaten, Vorschaubild); nur auf ausdrücklichen Wunsch aus der Galerie
     static func delete(_ id: UUID, in dir: URL) throws {
+        // Ein nicht lesbarer Ordner darf nicht als bereits erfolgreich gelöschter Clip gelten.
+        _ = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         for url in [movieURL(id, in: dir), metadataURL(id, in: dir), thumbnailURL(id, in: dir)]
         where FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)

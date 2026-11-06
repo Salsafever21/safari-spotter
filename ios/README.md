@@ -53,13 +53,18 @@ Bilddatei wird ohne Quell-Metadaten neu geschrieben, damit keine zweite ursprün
 Das gilt auch für andere Tierfotos innerhalb von 15 Minuten um geschützte Sichtungen oder Fotos. Vor Einzel- und
 Sammelexporten wird der Schutzkontext aus dem gesamten Datenspeicher gelesen, auch im Foto-Viewer einer einzelnen Fahrt.
 Bei einem Lesefehler wird der Export mit einer Meldung abgebrochen. Die gespeicherten Originalfotos werden nicht verändert.
-Verifiziert am 6. November 2026 mit Xcode 27.2: 110 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
+Verifiziert am 6. November 2026 mit Xcode 27.2: 114 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
 mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 8 wurde um 18:41 Uhr MEZ erfolgreich
 zu App Store Connect hochgeladen; Apple meldet die Verarbeitung des Pakets. Die Zuweisung zur internen TestFlight-Gruppe
 ist noch nicht bestätigt. Build 8 enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen.
+Build 9 ergänzt sichtbare Fehler beim Lesen des Videoordners: Die zuletzt geladene Clipliste bleibt erhalten,
+statt eine leere Galerie vorzutäuschen. **Videos erneut laden** aktualisiert die Liste nach einem vorübergehenden Fehler.
+Eine fehlgeschlagene Ordnerprüfung gilt nicht als abgeschlossene Wiederherstellung; sie kann erneut versucht werden.
+Auch Löschen meldet einen nicht lesbaren Ordner als Fehler. Tests mit einem vorübergehend blockierten Ordner prüfen
+die Fehleranzeige im Datenmodell, das erneute Laden, die Wiederherstellung und den unveränderten Erhalt der Originaldateien.
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.

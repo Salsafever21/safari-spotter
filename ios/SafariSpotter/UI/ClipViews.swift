@@ -6,6 +6,16 @@ struct ClipGrid: View {
     @ObservedObject var library: ClipLibrary
     @State private var playing: ClipRecord?
     var body: some View {
+        if let error = library.loadError {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(error).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("clip-load-error")
+                Button("Videos erneut laden") { library.reload() }.buttonStyle(.bordered)
+                    .accessibilityIdentifier("clip-reload")
+            }.frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+        if let error = library.recoveryError {
+            Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal)
+        }
         if !library.clips.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Videos \(library.clips.count)").font(.headline).padding(.horizontal)

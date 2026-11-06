@@ -12,19 +12,32 @@ final class ClipLibrary: ObservableObject {
 
     @Published private(set) var clips: [ClipRecord] = []
     @Published private(set) var recoveryError: String?
-    let directory: URL?
+    @Published private(set) var loadError: String?
+    private(set) var directory: URL?
     private var recoveryDone = false
     private var recoveryInProgress = false
 
-    init(directory: URL? = try? ClipFiles.defaultDirectory()) {
+    init(directory: URL? = nil) {
         self.directory = directory
         reload()
     }
 
     func reload() {
-        guard let directory else { return }
-        let list = ClipFiles.list(in: directory)
-        if Thread.isMainThread { clips = list } else { DispatchQueue.main.async { self.clips = list } }
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.reload() }; return }
+        do {
+            let directory = try resolveDirectory()
+            clips = try ClipFiles.list(in: directory)
+            loadError = nil
+        } catch {
+            loadError = "Videos konnten nicht geladen werden. Die zuletzt geladene Liste bleibt sichtbar. Es wurde nichts gelöscht. \(error.localizedDescription)"
+        }
+    }
+
+    private func resolveDirectory() throws -> URL {
+        if let directory { return directory }
+        let resolved = try ClipFiles.defaultDirectory()
+        directory = resolved
+        return resolved
     }
 
     func movieURL(_ clip: ClipRecord) -> URL? { directory.map { ClipFiles.movieURL(clip.id, in: $0) } }
@@ -36,7 +49,7 @@ final class ClipLibrary: ObservableObject {
 
     /// Nur auf ausdrücklichen Wunsch (Galerie, mit Rückfrage)
     func delete(_ clip: ClipRecord) throws {
-        guard let directory else { return }
+        let directory = try resolveDirectory()
         try ClipFiles.delete(clip.id, in: directory)
         reload()
     }
@@ -44,13 +57,24 @@ final class ClipLibrary: ObservableObject {
     /// Einmal nach dem Start: Aufnahmen, die beim Beenden der App noch liefen, prüfen und als wiederhergestellt markieren
     @MainActor
     func recoverInterrupted(excluding active: UUID?) async {
-        guard !recoveryDone, !recoveryInProgress, let directory else { return }
+        guard !recoveryDone, !recoveryInProgress else { return }
         recoveryInProgress = true
         defer { recoveryInProgress = false }
+        let directory: URL
+        do { directory = try resolveDirectory() }
+        catch {
+            recoveryError = "Videoaufnahmen konnten nicht geprüft werden. Die Dateien bleiben erhalten. \(error.localizedDescription)"
+            reload()
+            return
+        }
         let report = await ClipFiles.recoverInterrupted(in: directory, excluding: active, probe: Self.probe)
         guard !Task.isCancelled else { return }
-        recoveryDone = report.failedIDs.isEmpty
-        recoveryError = report.failedIDs.isEmpty ? nil : "\(report.failedIDs.count) Videoaufnahme(n) konnten nicht wiederhergestellt werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht."
+        recoveryDone = report.directoryError == nil && report.failedIDs.isEmpty
+        if let error = report.directoryError {
+            recoveryError = "Videoaufnahmen konnten nicht geprüft werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht. \(error)"
+        } else {
+            recoveryError = report.failedIDs.isEmpty ? nil : "\(report.failedIDs.count) Videoaufnahme(n) konnten nicht wiederhergestellt werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht."
+        }
         reload()
     }
 

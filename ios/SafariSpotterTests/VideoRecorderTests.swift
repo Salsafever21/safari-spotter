@@ -266,7 +266,7 @@ final class VideoRecorderTests: XCTestCase {
         try corrupt.write(to: ClipFiles.metadataURL(id, in: dir))
         try Data("Videodatei".utf8).write(to: ClipFiles.movieURL(id, in: dir))
 
-        XCTAssertEqual(ClipFiles.orphanMovies(in: dir), [id])
+        XCTAssertEqual(try ClipFiles.orphanMovies(in: dir), [id])
         let report = await ClipFiles.recoverInterrupted(in: dir) { _ in
             ClipProbe(duration: 2, width: 320, height: 240)
         }
