@@ -234,9 +234,11 @@ struct PhotoViewer: View {
             HStack { VStack(alignment: .leading) { Text(current.species.joined(separator: ", ")).bold(); Text("\(fmtDate(current.t)) \(fmtTime(current.t)) · \(current.lat == nil ? "ohne Standort" : current.coarse ? "Standort ±10 km (Artenschutz)" : String(format: "GPS %.4f, %.4f", current.lat!, current.lon!)) · \(index + 1)/\(photos.count)").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title2) } }.padding()
             if let ui = UIImage(data: current.image) {
                 GeometryReader { geo in
-                    let k = min(geo.size.width / CGFloat(current.width), geo.size.height / CGFloat(current.height))
+                    let width = CGFloat(current.width > 0 ? current.width : max(1, Int(ui.size.width * ui.scale)))
+                    let height = CGFloat(current.height > 0 ? current.height : max(1, Int(ui.size.height * ui.scale)))
+                    let k = min(geo.size.width / width, geo.size.height / height)
                     ZStack(alignment: .topLeading) {
-                        Image(uiImage: ui).resizable().scaledToFit().frame(width: CGFloat(current.width) * k, height: CGFloat(current.height) * k)
+                        Image(uiImage: ui).resizable().scaledToFit().frame(width: width * k, height: height * k)
                         if boxes { ForEach(Array(current.dets.enumerated()), id: \.offset) { i, d in
                             RoundedRectangle(cornerRadius: 6).strokeBorder(OverlayView.colors[i % 8], style: StrokeStyle(lineWidth: 2, dash: d.sure ? [] : [6, 4])).frame(width: d.w * k, height: d.h * k).offset(x: d.x * k, y: d.y * k)
                             Text("\(d.name ?? "Tier") \(Int(min(d.conf, 0.99) * 100)) %").font(.caption.bold()).padding(4).background(OverlayView.colors[i % 8], in: RoundedRectangle(cornerRadius: 5)).foregroundStyle(.black).offset(x: d.x * k, y: max(0, d.y * k - 22))
@@ -244,6 +246,9 @@ struct PhotoViewer: View {
                     }.frame(width: geo.size.width, height: geo.size.height, alignment: .center)
                 }
                 .gesture(DragGesture(minimumDistance: 40).onEnded { v in if v.translation.width < -40 { index = min(index + 1, photos.count - 1) } else if v.translation.width > 40 { index = max(index - 1, 0) } })
+            } else {
+                Text("Dieses Foto kann nicht angezeigt werden. Die gespeicherten Originaldaten bleiben erhalten.")
+                    .foregroundStyle(.orange).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
                 Button(saved ? "Gesichert" : "In Fotos sichern") {

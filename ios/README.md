@@ -44,6 +44,8 @@ Drive schaltet GPS beim Start ein; während einer aktiven Fahrt kann es erst nac
 Standortdaten, die bereits im importierten Foto stehen, bleiben unabhängig davon erhalten. Der Import einer Sicherung
 wartet auf das Ende eines Game Drives oder einer Videoaufnahme. Für diesen Stand bestanden 57 Logiktests und ein UI-Test.
 „Namen einblenden“ steuert nun auch die Live-Kamera: Rahmen bleiben sichtbar, Namen und Hinweise werden ausgeblendet.
+Der Bildbetrachter verwendet bei älteren Fotos ohne gespeicherte Abmessungen die Bilddatei als Grössenquelle und zeigt
+einen Hinweis, falls ein Foto nicht dekodiert werden kann.
 
 ## Bauen
 
