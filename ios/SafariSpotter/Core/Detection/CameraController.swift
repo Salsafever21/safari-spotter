@@ -30,7 +30,7 @@ private final class PhotoCaptureHandler: NSObject, AVCapturePhotoCaptureDelegate
 }
 
 /// Kamera (bis 4K), Erkennungsschleife und Sichtungen. Entspricht startCamera/detectLoop/classifyPending/maybeLog der Web-App.
-final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     enum Permission { case unknown, granted, denied }
     struct Lens: Identifiable, Equatable { let id: String; let name: String }
 
@@ -50,6 +50,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     @Published private(set) var previewSize: CGSize = .zero   // Grösse der Vorschau auf dem Bildschirm (Hauptthread)
     @Published private(set) var recording = false            // Videoaufnahme läuft (Hauptthread)
     @Published private(set) var recordingFinishing = false   // Videodatei wird noch fertig geschrieben
+    @Published private(set) var recordingStarting = false
     @Published private(set) var recordingStartedAt: Date?
     @Published var notice: String?                            // kurze Meldung, z. B. "Video gespeichert"
     private(set) var activeClipID: UUID?                      // laufender Clip, von der Wiederherstellung ausgenommen
@@ -60,9 +61,11 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private let queue = DispatchQueue(label: "ch.solution21.safarispotter.camera", qos: .userInitiated)
     /// Bildlieferung der Kamera: gibt jedes Bild sofort an die Aufnahme und nur bei freier Erkennung an `queue` weiter
     private let frameQueue = DispatchQueue(label: "ch.solution21.safarispotter.frames", qos: .userInitiated)
+    private let audioQueue = DispatchQueue(label: "ch.solution21.safarispotter.audio", qos: .userInitiated)
     private let detectionGate = DetectionGate()
     let recorder = VideoRecorder()
     private let output = AVCaptureVideoDataOutput()
+    private let audioOutput = AVCaptureAudioDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
     private var photoHandler: PhotoCaptureHandler?
     private var device: AVCaptureDevice?
@@ -73,6 +76,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var processingGeneration = 0     // nur auf `queue`
     private var displayGeneration = 0        // nur auf dem Hauptthread
     private var configured = false          // nur auf `queue`
+    private var recordingStartToken: UUID?
     private var viewSize: CGSize = .zero    // nur auf `queue`: Vorschaugrösse für den sichtbaren Ausschnitt
     private var observers: [NSObjectProtocol] = []
     private var lastHintAt: TimeInterval = 0
@@ -121,6 +125,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     /// Kamera anhalten (App im Hintergrund). Die Absicht "Tracken" bleibt erhalten, laufende Tracks werden verworfen.
     /// Eine laufende Videoaufnahme wird zuerst sauber abgeschlossen (mit Hintergrundzeit für das Fertigschreiben).
     func stop() {
+        recordingStartToken = nil; recordingStarting = false
         if recording { stopRecording(reason: .background) }
         displayGeneration += 1
         let generation = displayGeneration
@@ -318,14 +323,54 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     // MARK: Videoaufnahme (Hauptthread)
 
     func toggleRecording() {
-        if recording { stopRecording(reason: .user) } else { startRecording() }
+        if recording { stopRecording(reason: .user) } else if !recordingStarting { startRecording() }
     }
 
     /// Startet eine Aufnahme, mit oder ohne laufende Erkennung. Prüft Recht und freien Speicher; der Clip bekommt höchstens
     /// die vergröberte 10-km-Position (die Videodatei selbst gar keinen Ort).
     func startRecording() {
-        guard !recording, !recordingFinishing else { return }
+        guard !recording, !recordingFinishing, !recordingStarting else { return }
         guard permission == .granted else { lastError = "Für Videos braucht Safari Spotter die Kamera."; return }
+        recordingStarting = true
+        let token = UUID()
+        recordingStartToken = token
+        let ready: (Bool) -> Void = { [weak self] audioGranted in
+            guard let self else { return }
+            self.queue.async {
+                let audioReady = audioGranted && self.configureAudioIfNeeded()
+                DispatchQueue.main.async {
+                    guard self.recordingStartToken == token else { return }
+                    self.recordingStartToken = nil
+                    self.recordingStarting = false
+                    guard UIApplication.shared.applicationState == .active else { return }
+                    self.beginRecording(includeAudio: audioReady)
+                }
+            }
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: ready(true)
+        case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { granted in ready(granted) }
+        default: ready(false)
+        }
+    }
+
+    /// Mikrofon wird erst beim ersten Video angefragt. Verweigert der Nutzer es, bleibt die Videoaufnahme möglich.
+    /// Läuft auf `queue`, die auch alle Änderungen an der Capture-Session serialisiert.
+    private func configureAudioIfNeeded() -> Bool {
+        guard configured, let mic = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: mic) else { return false }
+        if session.outputs.contains(audioOutput) { return true }
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        guard session.canAddInput(input) else { return false }
+        session.addInput(input)
+        guard session.canAddOutput(audioOutput) else { session.removeInput(input); return false }
+        audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
+        session.addOutput(audioOutput)
+        return true
+    }
+
+    private func beginRecording(includeAudio: Bool) {
         let directory: URL
         do { directory = try ClipFiles.defaultDirectory() }
         catch { lastError = "Videoordner nicht verfügbar: \(error.localizedDescription)"; return }
@@ -338,7 +383,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let now = Date()
         let info = VideoRecorder.StartInfo(createdAt: now, directory: directory, burnIn: settings.burnIn, labels: settings.labels,
                                            position: position, lens: lenses.first { $0.id == selectedLensID }?.name,
-                                           trackingActive: tracking,
+                                           trackingActive: tracking, includeAudio: includeAudio,
                                            stamp: settings.burnIn ? "Safari Spotter · \(fmtDate(now)) \(fmtTime(now))" : nil)
         activeClipID = info.id
         recorder.start(info)
@@ -416,6 +461,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     /// Jedes Kamerabild geht sofort an die Videoaufnahme (eigene Queue). Die Erkennung bekommt ein Bild nur, wenn sie
     /// eingeschaltet und frei ist; Bilder werden für sie nie angestaut. So bremst eine langsame Erkennung die Aufnahme nie.
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output === audioOutput { recorder.appendAudio(sampleBuffer); return }
         detectionGate.route(record: { recorder.append(sampleBuffer) }, detectOn: queue) { self.detect(sampleBuffer) }
     }
 

@@ -117,13 +117,13 @@ struct LiveView: View {
                 }.pill()
                 Spacer()
                 Button { camera.toggleRecording() } label: {
-                    Image(systemName: camera.recordingFinishing ? "circle.dotted" : camera.recording ? "stop.circle.fill" : "record.circle").font(.title2)
+                    Image(systemName: camera.recordingFinishing || camera.recordingStarting ? "circle.dotted" : camera.recording ? "stop.circle.fill" : "record.circle").font(.title2)
                         .foregroundStyle(camera.recording ? Color.white : Color.red)
                 }
                 .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
                 .background(camera.recording ? Color.red : Color.black.opacity(0.6), in: Capsule())
-                .disabled(camera.permission != .granted || camera.recordingFinishing)
-                .accessibilityLabel(camera.recordingFinishing ? "Video wird gespeichert" : camera.recording ? "Videoaufnahme stoppen" : "Videoaufnahme starten")
+                .disabled(camera.permission != .granted || camera.recordingFinishing || camera.recordingStarting)
+                .accessibilityLabel(camera.recordingStarting ? "Video wird vorbereitet" : camera.recordingFinishing ? "Video wird gespeichert" : camera.recording ? "Videoaufnahme stoppen" : "Videoaufnahme starten")
                 Button { takePhoto() } label: {
                     Image(systemName: camera.capturingPhoto ? "circle.dotted" : "camera.circle.fill").font(.title2)
                 }

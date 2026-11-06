@@ -77,7 +77,7 @@ enum ClipFileError: LocalizedError, Equatable {
 /// Struktur (Schnittstelle für Backup/Restore):
 /// ```
 /// Application Support/Clips/
-///   <UUID>.mov    Video (HEVC oder H.264, ohne Ton, ohne Standort-Metadaten)
+///   <UUID>.mov    Video (HEVC oder H.264, optionaler Mikrofonton, ohne Standort-Metadaten)
 ///   <UUID>.json   ClipRecord, Version 1 (ISO-8601-Daten, sortierte Schlüssel)
 ///   <UUID>.jpg    Vorschaubild, längste Seite höchstens 480 px (optional)
 /// ```

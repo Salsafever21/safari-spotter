@@ -3,7 +3,7 @@ import AVFoundation
 import CoreMedia
 @testable import SafariSpotter
 
-/// Ende-zu-Ende mit echtem AVAssetWriter: jedes Bild landet in der Datei, die Datei trägt keinen Standort und keinen Ton,
+/// Ende-zu-Ende mit echtem AVAssetWriter: jedes Bild landet in der Datei, die Datei trägt keinen Standort,
 /// 4K wird auf Full HD verkleinert, eingebrannte Rahmen sind sichtbar, leere Aufnahmen hinterlassen nichts, abgebrochene
 /// Clips kommen zurück, und eine langsame Erkennung kostet über das echte Tor (`DetectionGate.route`) kein einziges Bild.
 final class VideoRecorderTests: XCTestCase {
@@ -40,6 +40,34 @@ final class VideoRecorderTests: XCTestCase {
         var sample: CMSampleBuffer?
         XCTAssertEqual(CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: description,
                                                                 sampleTiming: &timing, sampleBufferOut: &sample), noErr)
+        return try XCTUnwrap(sample)
+    }
+
+    private func audioSample(frame: Int) throws -> CMSampleBuffer {
+        var desc = AudioStreamBasicDescription(mSampleRate: 44_100, mFormatID: kAudioFormatLinearPCM,
+                                               mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+                                               mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2,
+                                               mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
+        var format: CMAudioFormatDescription?
+        XCTAssertEqual(CMAudioFormatDescriptionCreate(allocator: nil, asbd: &desc, layoutSize: 0, layout: nil,
+                                                      magicCookieSize: 0, magicCookie: nil, extensions: nil,
+                                                      formatDescriptionOut: &format), noErr)
+        var block: CMBlockBuffer?
+        let bytes = 2_048
+        XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
+                                                          blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
+                                                          dataLength: bytes, flags: 0, blockBufferOut: &block), noErr)
+        let silence = [UInt8](repeating: 0, count: bytes)
+        XCTAssertEqual(CMBlockBufferReplaceDataBytes(with: silence, blockBuffer: try XCTUnwrap(block),
+                                                     offsetIntoDestination: 0, dataLength: bytes), noErr)
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 44_100),
+                                        presentationTimeStamp: CMTime(value: CMTimeValue(frame * 1_470), timescale: 44_100),
+                                        decodeTimeStamp: .invalid)
+        var size = 2
+        var sample: CMSampleBuffer?
+        XCTAssertEqual(CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: try XCTUnwrap(format),
+                                                 sampleCount: 1_024, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                                                 sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample), noErr)
         return try XCTUnwrap(sample)
     }
 
@@ -146,6 +174,25 @@ final class VideoRecorderTests: XCTestCase {
                                         || ($0.identifier?.rawValue.lowercased().contains("location") ?? false) }
         XCTAssertFalse(location, "kein Standort in den Videometadaten")
         XCTAssertTrue(items.contains { $0.identifier == .quickTimeMetadataSoftware }, "Metadaten werden geschrieben und gelesen")
+    }
+
+    func testWritesMicrophoneAudioWhenEnabled() async throws {
+        let recorder = VideoRecorder()
+        var start = info()
+        start.includeAudio = true
+        recorder.start(start)
+        for frame in 0..<30 {
+            recorder.append(try sampleBuffer(width: 360, height: 640, frame: frame))
+            recorder.appendAudio(try audioSample(frame: frame))
+            try await Task.sleep(for: .milliseconds(33))
+        }
+        let stopped = try await stop(recorder)
+        let clip = try XCTUnwrap(stopped)
+        XCTAssertEqual(clip.state, .complete)
+        let asset = AVURLAsset(url: ClipFiles.movieURL(clip.id, in: dir))
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(tracks.count, 1)
+        XCTAssertGreaterThan(try sampleCount(asset, track: XCTUnwrap(tracks.first)), 0)
     }
 
     func testDownscales4KToFullHD() async throws {

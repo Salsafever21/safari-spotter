@@ -3,12 +3,11 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand 5. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 6 ist in der internen TestFlight-Gruppe;
+Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 ist für die interne TestFlight-Gruppe vorbereitet;
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.
-Vor Build 6 bestanden 39 Simulator-Tests; die anschliessende Ergänzung der zwei Kameraeinstellungen bestand zusätzlich
-vier gezielte Sicherungstests. Die Videoaufnahme selbst muss noch mit der iPhone-Kamera geprüft werden.
+Für Build 7 bestanden 41 Simulator-Tests. Die Videoaufnahme selbst muss noch mit der iPhone-Kamera geprüft werden.
 Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto wird vor der Tieranalyse als `PhotoItem` im
 App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
 Build 4 verhindert, dass ein verspätetes Erkennungsergebnis nach dem Ausschalten des Trackings Status oder Rahmen erneut
@@ -181,13 +180,16 @@ Datei baut und läuft die App unverändert.
 ## Videoaufnahme
 
 Roter Knopf in der unteren Leiste startet und stoppt die Aufnahme, mit oder ohne laufende Tiererkennung. Oben läuft ein Timer.
+Ab Build 7 fragt die App beim ersten Videostart nach Mikrofonzugriff und schreibt bei Erlaubnis eine AAC-Tonspur. Ohne
+Erlaubnis kann sie weiterhin ein stummes Video aufnehmen; ältere Clips erhalten nachträglich keinen Ton.
 Videos erscheinen in *Sichtungen → Galerie → Videos* (Abspielen, Teilen, In Fotos sichern, Löschen mit Rückfrage).
 
 - **Unabhängig von der Erkennung**: Die Kamera liefert Bilder auf eine eigene Queue (`CameraController.frameQueue`). Jedes Bild
   geht sofort an `VideoRecorder.append`, die Erkennung bekommt eines nur, wenn sie frei ist (`DetectionGate.route`); sie wird
   nie angestaut. `alwaysDiscardsLateVideoFrames` ist darum aus. Bilder, die doch verloren gehen (Kamera-Puffer voll, Schreiber
   nicht bereit, mehr als 6 Bilder im Rückstau), zählt `droppedFrames` im Clip.
-- **Datei**: QuickTime `.mov`, HEVC (sonst H.264), höchstens Full HD wie im Web (4K wird verkleinert), 30 fps, ohne Ton.
+- **Datei**: QuickTime `.mov`, HEVC (sonst H.264), höchstens Full HD wie im Web (4K wird verkleinert), 30 fps,
+  optionaler AAC-Mikrofonton.
   Fragmente je Sekunde: Nach einem Absturz bleibt der Clip bis zur letzten Sekunde lesbar und wird beim nächsten Start als
   "wiederhergestellt" in die Galerie geholt (`ClipFiles.recoverInterrupted`).
 - **Rahmen einbrennen** (Einstellungen → Video, Standard an wie `settings.burnIn` im Web): Rahmen, Eckwinkel, Namen (falls
@@ -233,14 +235,14 @@ Application Support/Clips/
 
 ## Bekannte Lücken
 
-- **Gerätetest**: Der Tracking-Fix aus Build 4 wurde auf dem iPhone bestätigt. Die Videoaufnahme und der neue Sicherungsweg
-  müssen mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
+- **Gerätetest**: Der Tracking-Fix aus Build 4 und der Sicherungsweg aus Build 6 wurden auf dem iPhone bestätigt. Die
+  Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
   mit echten Tieraufnahmen vermessen. Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
-- **Video ohne Ton**: Die Web-App nimmt den Ton mit, wenn das Mikrofon erlaubt ist; nativ fehlt das noch (braucht
-  `AVCaptureAudioDataOutput` und eine Audiospur im Schreiber, das Mikrofon-Recht steht schon in `project.yml`).
+- **Mikrofonton auf dem Gerät**: Die AAC-Tonspur ist mit synthetischen Samples im Simulator geprüft, die echte
+  Mikrofonaufnahme muss auf dem iPhone noch abgehört werden.
 - **Video auf dem Gerät**: Schreiber, Rahmen und Wiederherstellung sind mit XCTests im Simulator abgedeckt, die echte Kamera
   (4K, Wärme bei langer Aufnahme mit Erkennung, Hintergrundwechsel) ist noch nicht geprüft. Nicht eingebrannt wird der
   Hinweis "… vermutet" ohne Rahmen; das Video zeigt das ganze Kamerabild, nicht nur den Bildschirmausschnitt wie im Web.

@@ -9,7 +9,7 @@ import CoreMedia
 /// Queue mit `AVAssetWriter`; die langsame Erkennung läuft woanders und kann hier nichts aufhalten. Rahmen kommen über
 /// `updateOverlay` aus der Erkennung und werden auf Wunsch ins Bild eingebrannt.
 ///
-/// Datei: QuickTime `.mov`, HEVC (sonst H.264), höchstens Full HD, ohne Ton, mit Fragmenten je Sekunde (nach einem Absturz
+/// Datei: QuickTime `.mov`, HEVC (sonst H.264), höchstens Full HD, mit optionalem Mikrofonton, mit Fragmenten je Sekunde (nach einem Absturz
 /// bis zur letzten Sekunde lesbar). Metadaten nur Erstellungsdatum und Software, **nie ein Standort**.
 final class VideoRecorder {
     struct StartInfo {
@@ -21,6 +21,7 @@ final class VideoRecorder {
         var position: Position?      // muss bereits vergröbert sein; landet nur in der JSON-Datei, nie im Video
         var lens: String?
         var trackingActive: Bool
+        var includeAudio = false
         var stamp: String?           // "Safari Spotter · 05.11.2026 14:03", nur bei eingebrannten Rahmen
     }
 
@@ -104,6 +105,13 @@ final class VideoRecorder {
         }
     }
 
+    /// Mikrofonpuffer gehen auf dieselbe Schreib-Queue wie die Videobilder; bis zum ersten Videobild werden sie verworfen.
+    func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+        lock.lock(); let allowed = accepting; lock.unlock()
+        guard allowed else { return }
+        writerQueue.async { self.writeAudio(sampleBuffer) }
+    }
+
     /// Von `captureOutput(_:didDrop:from:)`: die Kamera hat ein Bild verworfen
     func noteDroppedFrame() {
         lock.lock(); if accepting { droppedByCamera += 1 }; lock.unlock()
@@ -136,6 +144,7 @@ final class VideoRecorder {
         let info: StartInfo
         var writer: AVAssetWriter?
         var input: AVAssetWriterInput?
+        var audioInput: AVAssetWriterInput?
         var adaptor: AVAssetWriterInputPixelBufferAdaptor?
         var outputSize: CGSize = .zero
         var codec = ""
@@ -184,6 +193,17 @@ final class VideoRecorder {
         }
     }
 
+    private func writeAudio(_ sampleBuffer: CMSampleBuffer) {
+        guard let rec = current, rec.info.includeAudio, rec.firstPTS.isValid,
+              let writer = rec.writer, writer.status == .writing,
+              let input = rec.audioInput, input.isReadyForMoreMediaData else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard pts.isValid, CMTimeCompare(pts, rec.firstPTS) >= 0 else { return }
+        if !input.append(sampleBuffer), writer.status == .failed {
+            fail(rec, writer.error?.localizedDescription ?? "Tonspur konnte nicht geschrieben werden")
+        }
+    }
+
     private func setUpWriter(_ rec: Recording, firstFrame pb: CVPixelBuffer, at pts: CMTime) throws {
         let frame = CGSize(width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb))
         let size = VideoGeometry.outputSize(for: frame)
@@ -204,6 +224,17 @@ final class VideoRecorder {
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: attributes)
         guard writer.canAdd(input) else { throw RecorderError.setup("Videospur") }
         writer.add(input)
+        if rec.info.includeAudio {
+            let audioSettings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC,
+                                                AVSampleRateKey: 44_100,
+                                                AVNumberOfChannelsKey: 1,
+                                                AVEncoderBitRateKey: 64_000]
+            let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            audioInput.expectsMediaDataInRealTime = true
+            guard writer.canAdd(audioInput) else { throw RecorderError.setup("Tonspur") }
+            writer.add(audioInput)
+            rec.audioInput = audioInput
+        }
         guard writer.startWriting() else { throw writer.error ?? RecorderError.setup("Schreiber") }
         writer.startSession(atSourceTime: pts)
         rec.writer = writer; rec.input = input; rec.adaptor = adaptor
@@ -267,6 +298,7 @@ final class VideoRecorder {
             completion(finalize(rec, notes: notes, state: .damaged)); return
         }
         input.markAsFinished()
+        rec.audioInput?.markAsFinished()
         writer.endSession(atSourceTime: CMTimeAdd(rec.lastPTS, frameDuration(rec)))
         writer.finishWriting {
             self.writerQueue.async {
