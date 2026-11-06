@@ -50,7 +50,7 @@ Der Export der geprüften Korrekturen erzeugt die JSON-Datei erst beim Tippen au
 Freigabe erhält eine eigene Datei, damit Änderungen an der Prüfliste eine bereits geöffnete Freigabe nicht überschreiben;
 Schreibfehler erscheinen in der App. Die exportierten Bildausschnitte werden ohne EXIF- und GPS-Metadaten neu kodiert.
 Die temporäre Datei wird erst nach Abschluss oder Abbruch der Teilen-Aktion entfernt;
-ältere liegengebliebene Exportdateien werden beim nächsten Export bereinigt.
+liegengebliebene Exportdateien, die älter als eine Stunde sind, werden beim nächsten Export bereinigt.
 
 ## Bauen
 
@@ -293,6 +293,8 @@ xcrun swift ios/Tools/model-check/main.swift ios/Models/SafariSpotterSpecies.mlp
   Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
   mit echten Tieraufnahmen vermessen. Die Trainingsbilder für das vorbereitete YOLO-Modell liegen derzeit nicht im Repository.
+  Geprüfte Korrekturbilder aus der App lassen sich lokal mit `training/import_corrections.py` in den Artenkopf-Datensatz
+  übernehmen; das Modell muss danach erneut trainiert und nach Core ML konvertiert werden. Die App lernt nicht selbsttätig.
   `ios/Tools/model-check/main.swift` prüft den vorhandenen Core-ML-Artenkopf auf einem lokalen Bildordner und meldet
   Top 1, Top 3, die Einzelbildentscheidung mit Sammelnamen, stark selbstsichere Fehler sowie die Mac-Laufzeit.
   Auf 228 lokal geladenen Fotos aus vier Klassen (Elefant, Breitmaulnashorn, Impala, Leopard) waren 186 Top-1-Treffer,

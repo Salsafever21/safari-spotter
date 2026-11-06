@@ -288,7 +288,7 @@ struct ReviewView: View {
     @State private var confirmDeleteDone = false
     var body: some View {
         List {
-            Text("Unsichere Erkennungen landen hier. Bestätigen oder korrigieren, dann exportieren: Daraus lernt das Modell deine Safari.").font(.caption).foregroundStyle(.secondary)
+            Text("Unsichere Erkennungen landen hier. Geprüfte Bildausschnitte kannst du exportieren und später auf dem Mac für ein neues Artenmodell verwenden.").font(.caption).foregroundStyle(.secondary)
             ForEach(reviews) { c in
                 HStack(spacing: 12) {
                     if let ui = UIImage(data: c.image) { Image(uiImage: ui).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 10)) }

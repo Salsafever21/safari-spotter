@@ -52,7 +52,10 @@ function variants(img) {
   for (const c of spec.classes) {
     const dir = path.join(DATA, c.key);
     if (!fs.existsSync(dir)) { console.log('fehlt:', c.key); continue; }
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg')).sort();
+    // A correction image is usable only after its label has been committed to manifest.json.
+    // This also ignores an orphaned JPEG if an import was interrupted before the manifest write.
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg') &&
+      (!f.startsWith('correction-') || manifest[c.key + '/' + f])).sort();
     let okFiles = 0;
     for (const f of files) {
       let img;

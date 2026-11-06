@@ -25,11 +25,16 @@ Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanif
 ```
 cd training && npm install
 python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY), Liste in species.json
+python3 import_corrections.py /Pfad/zu/korrekturen.json  # optional: geprüfte Ausschnitte aus der App (Pillow nötig)
 node embed.js                  # MobileNet-Embeddings mit demselben Graph wie im Browser
 node train.js                  # Kopf trainieren, Bericht in report.json, Export nach ../models/head/<version>/
 ```
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
+Der Korrekturimport nimmt nur bestätigte oder korrigierte Bilder mit eindeutigem Artschlüssel auf, entfernt Bildmetadaten,
+überspringt Duplikate und widersprüchliche Beschriftungen und schreibt die übernommenen Bilder ebenfalls nur nach `training/data/`.
+Ein Export trainiert das Modell nicht automatisch: Nach dem Import müssen `embed.js`, `train.js` und für iOS die
+Core-ML-Konvertierung aus `ios/README.md` erneut laufen. Die lokale Testmenge allein belegt keine Erkennungsqualität im Feld.
 
 ## Native iOS-App
 
