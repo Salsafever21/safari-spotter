@@ -7,6 +7,46 @@ import UniformTypeIdentifiers
 /// Nashorn-Standorte: Umbenennen schützt Sichtung und verknüpfte Fotos, der Export schreibt nie eine genaue Nashorn-Position
 /// und übernimmt nie GPS aus der Quelle (Befunde D2, D3)
 final class LocationProtectionTests: StoreTestCase {
+    @MainActor
+    func testNeighborPhotoExportsUseGlobalContextWithoutExpandingTheWindow() throws {
+        let time = Date(timeIntervalSince1970: 1_700_000_123)
+        let rhino = addSighting("Spitzmaulnashorn", position: coarsePosition)
+        rhino.t = time
+        let nearby = addPhoto(species: ["Elefant"], sightingIds: [])
+        nearby.t = time.addingTimeInterval(900)
+        let outside = addPhoto(species: ["Impala"], sightingIds: [])
+        outside.t = time.addingTimeInterval(901)
+        try context.save()
+        let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
+        XCTAssertEqual(protectedTimes, [time.timeIntervalSince1970], "Nachbarfotos dürfen das Fenster nicht kaskadierend erweitern")
+        XCTAssertTrue(PhotoExporter.requiresProtection(for: nearby, isSensitive: isSensitive, protectedTimes: protectedTimes))
+        let coordinate = try XCTUnwrap(PhotoExporter.exportCoordinate(for: nearby, isSensitive: isSensitive, protectedTimes: protectedTimes))
+        XCTAssertEqual(coordinate.latitude, coarsePosition.lat)
+        XCTAssertEqual(coordinate.longitude, coarsePosition.lon)
+        XCTAssertEqual(PhotoExporter.exportDate(for: nearby, isSensitive: isSensitive, protectedTimes: protectedTimes), Exporters.hourFloor(nearby.t))
+        XCTAssertFalse(PhotoExporter.requiresProtection(for: outside, isSensitive: isSensitive, protectedTimes: protectedTimes))
+        XCTAssertEqual(PhotoExporter.exportCoordinate(for: outside, isSensitive: isSensitive, protectedTimes: protectedTimes)?.latitude, exact.lat)
+        XCTAssertEqual(nearby.lat, exact.lat)
+        XCTAssertFalse(nearby.coarse)
+        XCTAssertEqual(nearby.t, time.addingTimeInterval(900))
+    }
+
+    @MainActor
+    func testPhotoWithoutSightingProtectsExportOfOtherSpecies() throws {
+        let time = Date(timeIntervalSince1970: 1_700_000_123)
+        let protected = addPhoto(species: ["Impala"], dets: [PhotoDet(x: 0, y: 0, w: 4, h: 4,
+                                name: "Nashorn", conf: 0.8, sure: true)], sightingIds: [])
+        protected.t = time
+        let other = addPhoto(species: ["Elefant"], sightingIds: [])
+        other.t = time.addingTimeInterval(180)
+        try context.save()
+        let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
+        XCTAssertTrue(allSightings().isEmpty)
+        XCTAssertTrue(PhotoExporter.requiresProtection(for: other, isSensitive: isSensitive, protectedTimes: protectedTimes))
+        XCTAssertEqual(PhotoExporter.exportCoordinate(for: other, isSensitive: isSensitive, protectedTimes: protectedTimes)?.latitude, coarsePosition.lat)
+        XCTAssertEqual(PhotoExporter.exportDate(for: other, isSensitive: isSensitive, protectedTimes: protectedTimes), Exporters.hourFloor(other.t))
+    }
+
     func testCatalogMarksRhinos() throws {
         XCTAssertTrue(isSensitive("Breitmaulnashorn"))
         XCTAssertTrue(isSensitive("Spitzmaulnashorn"))

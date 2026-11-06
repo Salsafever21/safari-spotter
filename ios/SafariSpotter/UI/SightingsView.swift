@@ -221,13 +221,16 @@ struct GalleryView: View {
                 Button(busy ? "Sichere …" : "Alle in Fotos sichern") {
                     Task {
                         busy = true; defer { busy = false }
-                        do { for p in photos { try await PhotoExporter.export(p, isSensitive: { catalog.isSensitive(name: $0) }) } }
+                        do {
+                            let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
+                            for p in photos { try await PhotoExporter.export(p, isSensitive: catalog.isSensitive, protectedTimes: protectedTimes) }
+                        }
                         catch { exportError = error.localizedDescription }
                     }
                 }.disabled(busy || photos.isEmpty)
                 Button("Alle löschen", role: .destructive) { confirmDelete = true }
             }.buttonStyle(.bordered).padding()
-            Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. In der Fotos-App erscheinen sie auf der Orte-Karte. Nashorn-Fotos erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+            Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. Nashorn-Fotos und andere Fotos innerhalb von 15 Minuten erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
         .confirmationDialog("Alle Fotos aus der App löschen?", isPresented: $confirmDelete) {
@@ -278,7 +281,11 @@ struct PhotoViewer: View {
                 Button(saved ? "Gesichert" : "In Fotos sichern") {
                     let item = current
                     Task {
-                        do { try await PhotoExporter.export(item, isSensitive: { catalog.isSensitive(name: $0) }); saved = true }
+                        do {
+                            let protectedTimes = try Exporters.protectedTimes(context: context, catalog: catalog)
+                            try await PhotoExporter.export(item, isSensitive: catalog.isSensitive, protectedTimes: protectedTimes)
+                            saved = true
+                        }
                         catch { exportError = error.localizedDescription }
                     }
                 }.buttonStyle(.borderedProminent)

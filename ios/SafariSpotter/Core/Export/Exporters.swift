@@ -5,6 +5,7 @@ import ImageIO
 import CoreImage
 import UniformTypeIdentifiers
 import CryptoKit
+import SwiftData
 
 /// Exporte mit Artenschutz: Nashorn-Sichtungen nur mit 10-km-Raster und auf die Stunde gerundeter Zeit, Spur ±15 min ausgeblendet.
 enum Exporters {
@@ -20,9 +21,16 @@ enum Exporters {
         return text
     }
 
-    private static func protectedTimes(sightings: [Sighting], photos: [PhotoItem], catalog: SpeciesCatalog) -> [TimeInterval] {
+    static func protectedTimes(sightings: [Sighting], photos: [PhotoItem], catalog: SpeciesCatalog) -> [TimeInterval] {
         sightings.filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
         + photos.filter { PhotoExporter.requiresProtection(for: $0, isSensitive: catalog.isSensitive) }.map { $0.t.timeIntervalSince1970 }
+    }
+
+    /// Vor Fotoexporten immer den gesamten Speicher lesen; ein Lesefehler darf keinen ungeschützten Export ergeben.
+    @MainActor
+    static func protectedTimes(context: ModelContext, catalog: SpeciesCatalog) throws -> [TimeInterval] {
+        protectedTimes(sightings: try context.fetch(FetchDescriptor<Sighting>()),
+                       photos: try context.fetch(FetchDescriptor<PhotoItem>()), catalog: catalog)
     }
 
     static func csv(sightings: [Sighting], catalog: SpeciesCatalog,
@@ -144,13 +152,16 @@ enum CorrectionExporter {
 /// Artenschutz: Die Position, mit der ein Foto die App verlässt, kommt immer aus `exportCoordinate` (zweite Absicherung,
 /// greift auch bei Fotos, die vor dieser Regel oder per Import gespeichert wurden).
 enum PhotoExporter {
-    static func requiresProtection(for photo: PhotoItem, isSensitive: (String) -> Bool) -> Bool {
+    static func requiresProtection(for photo: PhotoItem, isSensitive: (String) -> Bool,
+                                    protectedTimes: [TimeInterval] = []) -> Bool {
         photo.coarse || LocationProtection.containsSensitive(photo.species.map { $0 as String? } + photo.dets.map(\.name),
                                                             isSensitive: isSensitive)
+            || protectedTimes.contains { abs(photo.t.timeIntervalSince1970 - $0) <= 15 * 60 }
     }
 
-    static func exportDate(for photo: PhotoItem, isSensitive: (String) -> Bool) -> Date {
-        requiresProtection(for: photo, isSensitive: isSensitive) ? Exporters.hourFloor(photo.t) : photo.t
+    static func exportDate(for photo: PhotoItem, isSensitive: (String) -> Bool,
+                           protectedTimes: [TimeInterval] = []) -> Date {
+        requiresProtection(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes) ? Exporters.hourFloor(photo.t) : photo.t
     }
 
     enum ExportError: LocalizedError {
@@ -164,9 +175,9 @@ enum PhotoExporter {
     }
 
     /// Exportposition: schon vergröbert bleibt, sensible Art in Artenliste **oder** Rahmen → 10-km-Raster, sonst genau
-    static func exportCoordinate(for photo: PhotoItem, isSensitive: (String) -> Bool) -> CLLocationCoordinate2D? {
-        let names = photo.species.map { $0 as String? } + photo.dets.map { $0.name }
-        let sensitive = LocationProtection.containsSensitive(names, isSensitive: isSensitive)
+    static func exportCoordinate(for photo: PhotoItem, isSensitive: (String) -> Bool,
+                                 protectedTimes: [TimeInterval] = []) -> CLLocationCoordinate2D? {
+        let sensitive = requiresProtection(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
         guard let p = LocationProtection.protectedPosition(lat: photo.lat, lon: photo.lon, coarse: photo.coarse, sensitive: sensitive) else { return nil }
         return CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
     }
@@ -238,11 +249,12 @@ enum PhotoExporter {
     }
 
     /// Foto mit geschützter Position, Datum und Artnamen in die Mediathek sichern
-    static func export(_ photo: PhotoItem, isSensitive: (String) -> Bool) async throws {
-        let coordinate = exportCoordinate(for: photo, isSensitive: isSensitive)
-        let date = exportDate(for: photo, isSensitive: isSensitive)
+    static func export(_ photo: PhotoItem, isSensitive: (String) -> Bool,
+                        protectedTimes: [TimeInterval]) async throws {
+        let coordinate = exportCoordinate(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
+        let date = exportDate(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes)
         let jpeg = jpegWithMetadata(photo.image, date: date, coordinate: coordinate, description: "Safari Spotter: " + photo.species.joined(separator: ", "),
-                                    stripSourceMetadata: requiresProtection(for: photo, isSensitive: isSensitive))
+                                    stripSourceMetadata: requiresProtection(for: photo, isSensitive: isSensitive, protectedTimes: protectedTimes))
         guard !jpeg.isEmpty else { throw ExportError.metadata }
         guard await requestAddAccess() else { throw ExportError.denied }
         try await PHPhotoLibrary.shared().performChanges {

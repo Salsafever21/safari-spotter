@@ -34,7 +34,10 @@ gemeldet und können nicht als scheinbar vollständige GPX-Datei exportiert werd
 Exportdateien werden erst beim Tippen erstellt und nach Abschluss oder Abbruch der Freigabe entfernt.
 Beim Sichern geschützter Fotos in die Fotos-Mediathek wird die Aufnahmezeit auf die Stunde gerundet. Die exportierte
 Bilddatei wird ohne Quell-Metadaten neu geschrieben, damit keine zweite ursprüngliche Zeitangabe mitgeht.
-Verifiziert am 6. November 2026 mit Xcode 27.2: 90 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
+Das gilt auch für andere Tierfotos innerhalb von 15 Minuten um geschützte Sichtungen oder Fotos. Vor Einzel- und
+Sammelexporten wird der Schutzkontext aus dem gesamten Datenspeicher gelesen, auch im Foto-Viewer einer einzelnen Fahrt.
+Bei einem Lesefehler wird der Export mit einer Meldung abgebrochen. Die gespeicherten Originalfotos werden nicht verändert.
+Verifiziert am 6. November 2026 mit Xcode 27.2: 92 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
 mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
