@@ -15,24 +15,27 @@ enum Exporters {
         var rows = ["Datum;Zeit;Art;Anzahl;Breite;Laenge;Genauigkeit"]
         for s in sightings {
             let sens = s.coarse || catalog.isSensitive(name: s.name)
+            let position = LocationProtection.protectedPosition(lat: s.lat, lon: s.lon, coarse: s.coarse, sensitive: sens)
             let t = sens ? hourFloor(s.t) : s.t
-            let prec = s.lat == nil ? "" : sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m"
-            let lat = s.lat.map { String(format: sens ? "%.2f" : "%.5f", $0) } ?? "", lon = s.lon.map { String(format: sens ? "%.2f" : "%.5f", $0) } ?? ""
+            let prec = position == nil ? "" : sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m"
+            let lat = position.map { String(format: sens ? "%.2f" : "%.5f", $0.lat) } ?? "", lon = position.map { String(format: sens ? "%.2f" : "%.5f", $0.lon) } ?? ""
             rows.append([df.string(from: t), tf.string(from: t) + (sens ? " (gerundet)" : ""), s.name, String(s.n), lat, lon, prec].joined(separator: ";"))
         }
         return "\u{FEFF}" + rows.joined(separator: "\n")
     }
 
-    static func gpx(points: [TrackPoint], sightings: [Sighting], catalog: SpeciesCatalog, version: String) -> String {
+    static func gpx(points: [TrackPoint], sightings: [Sighting], catalog: SpeciesCatalog, version: String,
+                    privacySightings: [Sighting]? = nil) -> String {
         let iso = ISO8601DateFormatter()
-        let sensTimes = sightings.filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
+        let sensTimes = (privacySightings ?? sightings).filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
         func hidden(_ t: TimeInterval) -> Bool { sensTimes.contains { abs(t - $0) < 15 * 60 } }
         func esc(_ s: String) -> String { s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;") }
         var g = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"Safari Spotter iOS \(version)\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n"
-        for s in sightings { guard let lat = s.lat, let lon = s.lon else { continue }
+        for s in sightings {
             let sens = s.coarse || catalog.isSensitive(name: s.name)
+            guard let position = LocationProtection.protectedPosition(lat: s.lat, lon: s.lon, coarse: s.coarse, sensitive: sens) else { continue }
             let t = sens ? hourFloor(s.t) : s.t
-            g += "  <wpt lat=\"\(String(format: sens ? "%.3f" : "%.5f", lat))\" lon=\"\(String(format: sens ? "%.3f" : "%.5f", lon))\"><time>\(iso.string(from: t))</time><name>\(esc(s.name))\(s.n > 1 ? " (\(s.n))" : "")</name><desc>\(sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m")</desc></wpt>\n"
+            g += "  <wpt lat=\"\(String(format: sens ? "%.3f" : "%.5f", position.lat))\" lon=\"\(String(format: sens ? "%.3f" : "%.5f", position.lon))\"><time>\(iso.string(from: t))</time><name>\(esc(s.name))\(s.n > 1 ? " (\(s.n))" : "")</name><desc>\(sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m")</desc></wpt>\n"
         }
         if !points.isEmpty {
             g += "  <trk><name>Safari</name><trkseg>\n"; var open = true

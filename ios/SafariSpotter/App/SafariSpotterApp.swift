@@ -37,7 +37,14 @@ private enum StorageLaunch {
     case failed(String)
 
     static func open() -> StorageLaunch {
-        do { return .ready(try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self)) }
+        do {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["SAFARI_SPOTTER_UI_FIXTURE"] == "drive-history" {
+                return .ready(try DriveHistoryFixture.make())
+            }
+            #endif
+            return .ready(try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self))
+        }
         catch { return .failed(error.localizedDescription) }
     }
 }

@@ -17,7 +17,6 @@ struct SightingsView: View {
     @State private var tab = 0
     @State private var profile: SpeciesClass?
     @State private var correction: CorrectionTarget?
-    @State private var viewer: PhotoItem?
     @State private var confirmClear = false
     @State private var storageError: String?
     @ObservedObject private var clipLibrary = ClipLibrary.shared
@@ -118,56 +117,11 @@ struct SightingsView: View {
     }
     private func tile(_ v: String, _ l: String) -> some View { VStack { Text(v).font(.title2.monospacedDigit().bold()); Text(l).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity) }
 
-    // MARK: Karte
+    // MARK: Karte und Fahrtenhistorie
     private var mapTab: some View {
-        let pts = drive.active ? drive.points : (drives.first?.points ?? [])
-        let stats = drive.active ? drive.stats(sightings: sightings) : drives.first.map { DriveStats.compute(points: $0.points, startedAt: $0.startedAt, endedAt: $0.endedAt, dist: $0.dist, sightings: sightings) }
-        return List {
-            if let st = stats {
-                HStack { tile(fmtKm(st.dist), "km"); tile(fmtDur(st.dur), "Dauer"); tile("\(Int(st.avgMoving * 3.6))", "km/h in Fahrt") }
-                HStack { tile("\(st.stops.count)", "Stopps"); tile(fmtDur(st.standing), "Standzeit"); tile("\(Int(st.maxSpeed * 3.6))", "km/h max") }
-            }
-            Section("Karte mit Route, Fotos und Sichtungen") {
-                Map {
-                    if pts.count > 1 { MapPolyline(coordinates: pts.map { $0.coordinate }).stroke(Color.accentColor, lineWidth: 4) }
-                    ForEach(photos.filter { $0.coordinate != nil }) { p in
-                        Annotation(p.species.first ?? "Foto", coordinate: p.coordinate!) {
-                            Button { viewer = p } label: {
-                                if let d = p.thumb, let ui = UIImage(data: d) { Image(uiImage: ui).resizable().scaledToFill().frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(p.coarse ? Color.red : Color.white, style: StrokeStyle(lineWidth: 2, dash: p.coarse ? [4] : []))) }
-                            }
-                        }
-                    }
-                    // Getrennt statt if/else im ForEach: genaue Sichtungen als Punkt, Nashörner nur als 10-km-Kreis
-                    ForEach(sightings.filter { $0.coordinate != nil && !$0.coarse }) { s in
-                        Annotation(s.name, coordinate: s.coordinate!) { Circle().fill(Color.green).frame(width: 12, height: 12).overlay(Circle().stroke(.black, lineWidth: 1)) }
-                    }
-                    ForEach(sightings.filter { $0.coordinate != nil && $0.coarse }) { s in
-                        MapCircle(center: s.coordinate!, radius: 10000).foregroundStyle(Color.red.opacity(0.08)).stroke(Color.red, lineWidth: 1.5)
-                    }
-                    if settings.gps, let f = drive.lastFix { Annotation("", coordinate: f.coordinate) { Circle().fill(Color.cyan).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2)) } }
-                }.frame(height: 320)
-                Text("Nashorn-Sichtungen erscheinen als 10-km-Kreis, ihre Fotos mit rotem Rand.").font(.caption).foregroundStyle(.secondary)
-            }
-            if let st = stats, !st.stops.isEmpty {
-                Section("Stopps mit Sichtungen") {
-                    ForEach(Array(st.stops.enumerated()), id: \.offset) { i, sp in
-                        VStack(alignment: .leading) { HStack { Text("Stopp \(i + 1) · \(fmtTime(sp.t0))\(sp.open ? " (läuft)" : "")"); Spacer(); Text("\(fmtDur(sp.dur)) h").monospacedDigit() }
-                            Text(sp.sightings.isEmpty ? "keine Sichtung" : sp.sightings.map { $0.name + ($0.n > 1 ? " \($0.n)×" : "") }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }
-                    }
-                }
-            }
-            Section {
-                if let url = Exporters.tempFile(Exporters.gpx(points: pts, sightings: sightings.reversed(), catalog: catalog, version: "1.0"), name: "safari.gpx") { ShareLink(item: url) { Label("GPX exportieren", systemImage: "map") } }
-            }
-            Section("Frühere Game Drives") {
-                ForEach(drives) { d in let x = DriveStats.compute(points: d.points, startedAt: d.startedAt, endedAt: d.endedAt, dist: d.dist, sightings: sightings)
-                    VStack(alignment: .leading) { HStack { Text("\(fmtDate(d.startedAt)) \(fmtTime(d.startedAt)) bis \(fmtTime(d.endedAt))"); Spacer(); Text("\(fmtKm(d.dist)) km").bold() }
-                        Text("\(d.sightings) Tiere · \(x.stops.count) Stopps · \(fmtDur(x.standing)) h Stand · Ø \(Int(x.avgMoving * 3.6)) km/h").font(.caption).foregroundStyle(.secondary) }
-                }
-            }
-        }
-        .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
+        DriveHistoryView(sightings: sightings, photos: photos, drives: drives)
     }
+
 }
 
 /// Galerie mit Vollbild-Viewer und "In Fotos sichern" (EXIF: Datum, GPS, Artnamen)
@@ -313,7 +267,7 @@ struct ReviewView: View {
                     c.status = "corrected"; c.label = name; c.labelKey = key; commit("Korrektur speichern")
                 }
             case .share(let url):
-                CorrectionShareSheet(url: url) { completeExport(url) }
+                FileShareSheet(url: url) { completeExport(url) }
                     .interactiveDismissDisabled()
             }
         }
@@ -354,7 +308,7 @@ private enum ReviewSheet: Identifiable {
     }
 }
 
-private struct CorrectionShareSheet: UIViewControllerRepresentable {
+struct FileShareSheet: UIViewControllerRepresentable {
     let url: URL
     let onComplete: () -> Void
     func makeUIViewController(context: Context) -> UIActivityViewController {

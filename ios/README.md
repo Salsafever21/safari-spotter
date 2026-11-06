@@ -15,6 +15,14 @@ wie SANParks für Kruger und Addo dokumentiert. Eine Auswahl nach Park oder Rese
 vorgesehen. Die Reiseauswahl kann in den Einstellungen geändert werden und ist in der nativen Sicherung enthalten.
 Beim Onboarding wird die Kamera noch nicht geöffnet; der SwiftData-Speicher und die bisherigen Sichtungen bleiben erhalten.
 
+Unter **Sichtungen → Karte** zeigt die Gesamtkarte alle Aufnahmen. Jede gespeicherte Fahrt lässt sich separat öffnen:
+Route, Statistik, Stopps, Kilometer-Splits, Sichtungen und Fotos werden für ihren gespeicherten Zeitraum angezeigt.
+GPX und CSV lassen sich für genau diese Fahrt teilen. Der GPX-Artenschutz berücksichtigt auch Nashorn-Sichtungen kurz
+ausserhalb des Fahrtzeitraums, damit angrenzende Spurpunkte geschützt bleiben. Die Exportkoordinaten werden erneut
+vergröbert, falls ein älterer Eintrag trotz sensibler Art noch eine genaue Position enthält. Unlesbare Routen werden
+gemeldet und können nicht als scheinbar vollständige GPX-Datei exportiert werden. Die Originaldaten bleiben erhalten.
+Exportdateien werden erst beim Tippen erstellt und nach Abschluss oder Abbruch der Freigabe entfernt.
+
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
 die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8
 enthält weitere Datenschutz- und Speicherverbesserungen; die TestFlight-Bereitstellung folgt nach Sandros Rückkehr.
@@ -151,8 +159,10 @@ ios/
                                      ClipFiles (Dateiformat, Wiederherstellung, Restore), ClipLibrary (Galerie, Fotos-Export)
     UI/ClipViews.swift               Videos in der Galerie, Player mit Teilen, In Fotos sichern, Löschen
     Core/Location/DriveRecorder      GPS, Region, Game Drive (Punkte, Statistik, Hintergrund), wie tripStats()
+    Core/Location/DriveHistory       Zeitraumfilter und geschützte Exporte einzelner Fahrten
     Core/Export/Exporters.swift      CSV, GPX (Artenschutz-Regeln), JPEG mit EXIF/GPS in die Fotos-Mediathek
     UI/LiveView.swift                Kamerabild, Overlay, Tracken, Game Drive, Zoom
+    UI/DriveHistoryView.swift        Gesamtkarte, Fahrtenhistorie und Detailansicht mit GPX/CSV
     UI/TravelViews.swift             Reise-Onboarding, Länderauswahl und Tierführer
     UI/SightingsView.swift           Liste, Zählung, Karte (MapKit), Galerie, Prüfen
     UI/Sheets.swift                  Artwahl, Korrektur, Steckbrief, Game Drive live, Einstellungen, Bildanalyse
