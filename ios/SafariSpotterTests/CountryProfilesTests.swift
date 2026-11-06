@@ -43,6 +43,38 @@ final class CountryProfilesTests: XCTestCase {
         XCTAssertLessThan(fromOrigin[elephant], adjusted[elephant])
     }
 
+    func testCountryCannotTurnPetsOrUncertainImagesIntoSureWildlife() {
+        let catalog = SpeciesCatalog.shared
+        guard let elephant = catalog.classes.firstIndex(where: { $0.key == "elefant" }),
+              let dog = catalog.classes.firstIndex(where: { $0.key == "anderes_hund" }),
+              let meerkat = catalog.classes.firstIndex(where: { $0.key == "erdmaennchen" }) else {
+            return XCTFail("Expected model classes missing")
+        }
+        var probabilities = [Double](repeating: 0, count: catalog.classes.count)
+        probabilities[dog] = 0.49
+        probabilities[elephant] = 0.48
+        probabilities[meerkat] = 0.03
+        XCTAssertEqual(catalog.applyPrior(probabilities, region: nil, destinationCode: "ZA"), probabilities)
+
+        probabilities[dog] = 0.48
+        probabilities[elephant] = 0.49
+        XCTAssertEqual(catalog.applyPrior(probabilities, region: nil, destinationCode: "ZA"), probabilities)
+    }
+
+    func testIncompleteCountryListCannotReplaceModelWinner() {
+        let catalog = SpeciesCatalog.shared
+        guard let caracal = catalog.classes.firstIndex(where: { $0.key == "karakal" }),
+              let leopard = catalog.classes.firstIndex(where: { $0.key == "leopard" }) else {
+            return XCTFail("Expected model classes missing")
+        }
+        var probabilities = [Double](repeating: 0, count: catalog.classes.count)
+        probabilities[caracal] = 0.51
+        probabilities[leopard] = 0.45
+        let adjusted = catalog.applyPrior(probabilities, region: nil, destinationCode: "ZA")
+        XCTAssertGreaterThan(adjusted[caracal], adjusted[leopard])
+        XCTAssertEqual(SpeciesDecision.decide(adjusted, catalog: catalog).key, "karakal")
+    }
+
     func testHabitatsAllowGroundAirAndWater() {
         let catalog = SpeciesCatalog.shared
         XCTAssertTrue(catalog.habitats(for: "elefant").contains(.ground))

@@ -136,16 +136,26 @@ final class SpeciesCatalog: ObservableObject {
     func applyPrior(_ probs: [Double], region: Region?, originCode: String? = nil, destinationCode: String? = nil) -> [Double] {
         guard probs.count == classes.count else { return probs }
         let bad = Set(region?.unlikely ?? [])
-        let origin = Set(originCode.flatMap { country($0)?.featured } ?? [])
-        let destination = Set(destinationCode.flatMap { country($0)?.featured } ?? [])
-        guard !bad.isEmpty || !origin.isEmpty || !destination.isEmpty else { return probs }
+        var topAnimal = 0.0, topNonSafari = 0.0
+        var topAnimalIndex: Int?
+        for (index, species) in classes.enumerated() {
+            let probability = probs[index]
+            if species.negative { topNonSafari = max(topNonSafari, probability) }
+            else if probability > topAnimal { topAnimal = probability; topAnimalIndex = index }
+        }
+        // Länder dürfen einen unsicheren Treffer oder ein Haustier nie zu einer sicheren Safari-Sichtung machen.
+        let allowCountry = topAnimal >= 0.5 && topAnimal > topNonSafari
+        var countryFactor = 1.0
+        if allowCountry, let index = topAnimalIndex {
+            let key = classes[index].key
+            if destinationCode.flatMap({ country($0)?.featured.contains(key) }) == true { countryFactor = 1.25 }
+            else if originCode.flatMap({ country($0)?.featured.contains(key) }) == true { countryFactor = 1.15 }
+        }
+        guard !bad.isEmpty || countryFactor > 1 else { return probs }
         var out = probs
         for (i, c) in classes.enumerated() where bad.contains(c.key) { out[i] *= priorFactor }
-        // Beide Länder sind nur schwaches Vorwissen; andere Arten bleiben immer erkennbar.
-        for (i, c) in classes.enumerated() {
-            if destination.contains(c.key) { out[i] *= 1.25 }
-            else if origin.contains(c.key) { out[i] *= 1.15 }
-        }
+        // Ein unvollständiges Länderprofil darf die Artentscheidung nicht zugunsten einer anderen Art kippen.
+        if let index = topAnimalIndex { out[index] *= countryFactor }
         let sum = out.reduce(0, +)
         return sum > 0 ? out.map { $0 / sum } : probs
     }

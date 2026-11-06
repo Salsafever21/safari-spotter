@@ -6,8 +6,9 @@ Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `ap
 Beim ersten Start fragt das Reise-Onboarding nach Ausgangsland und Reiseziel. Zehn recherchierte Länderprofile
 (Südafrika, Namibia, Botswana, Simbabwe, Sambia, Mosambik, Tansania, Kenia, Uganda und Ruanda) nennen im bestehenden
 Modell erkennbare Arten mit offiziellen Quellen. Alle anderen Länder sind ebenfalls wählbar und nutzen die allgemeine
-Erkennung. Das Reiseziel gibt belegten Arten einen schwachen Faktor von 1,25, das Ausgangsland einen Faktor von 1,15;
-andere Arten bleiben erkennbar. Bestehendes
+Erkennung. Bei bereits sicher erkannten Tieren gibt das Reiseziel belegten Arten einen schwachen Faktor von 1,25, das
+Ausgangsland einen Faktor von 1,15. Die Faktoren gelten nur für die bereits vom Modell gewählte Art. Unsichere Treffer,
+Haustiere und andere Arten werden dadurch nicht zu einer neuen oder anderen Safari-Sichtung. Bestehendes
 GPS-Vorwissen für südafrikanische Teilregionen bleibt zusätzlich aktiv. Der Tierführer im Kamerabild ordnet Arten nach
 Boden, Luft und Wasser ein und zeigt die Quellen. Er ist keine vollständige Verbreitungskarte. Südafrika enthält Elefanten,
 wie SANParks für Kruger und Addo dokumentiert. Eine Auswahl nach Park oder Reservat ist für eine spätere Ausbaustufe

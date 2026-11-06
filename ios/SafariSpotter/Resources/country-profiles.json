@@ -3,8 +3,8 @@
   "profiles": [
     {
       "code": "ZA", "name": "Südafrika",
-      "featured": ["elefant", "breitmaulnashorn", "spitzmaulnashorn", "flusspferd", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "wildhund", "tuepfelhyaene", "impala", "kudu", "streifengnu", "warzenschwein", "nilkrokodil", "brillenpinguin", "seebaer", "hornrabe", "riesentrappe", "gaukler", "schreiseeadler", "sattelstorch", "marabu"],
-      "sources": ["https://www.sanparks.org/parks/kruger/explore/fauna-flora/mammals", "https://www.sanparks.org/parks/kruger/explore/fauna-flora/birds", "https://www.sanparks.org/parks/table-mountain/what-to-do/attractions/boulders-penguin-colony", "https://www.sanparks.org/parks/addo-elephant/"]
+      "featured": ["elefant", "breitmaulnashorn", "spitzmaulnashorn", "flusspferd", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "wildhund", "tuepfelhyaene", "impala", "kudu", "nyala", "buschbock", "wasserbock", "streifengnu", "warzenschwein", "nilkrokodil", "brillenpinguin", "seebaer", "hornrabe", "riesentrappe", "gaukler", "schreiseeadler", "sattelstorch", "marabu"],
+      "sources": ["https://www.sanparks.org/parks/kruger/explore/fauna-flora/mammals", "https://www.sanparks.org/parks/kruger/explore/fauna-flora/mammals/checklist", "https://www.sanparks.org/parks/kruger/explore/fauna-flora/birds", "https://www.sanparks.org/parks/table-mountain/what-to-do/attractions/boulders-penguin-colony", "https://www.sanparks.org/parks/addo-elephant/"]
     },
     {
       "code": "NA", "name": "Namibia",
