@@ -238,7 +238,7 @@ struct GalleryView: View {
             HStack {
                 Button(exporter.isRunning ? "Sichere …" : "Alle in Fotos sichern") {
                     exporter.start(photos: photos, context: context, catalog: catalog)
-                }.disabled(exporter.isRunning || photos.isEmpty)
+                }.disabled(!exporter.canStart || photos.isEmpty)
                 Button("Alle löschen", role: .destructive) { confirmDelete = true }
                     .disabled(exporter.isRunning || photos.isEmpty)
             }.buttonStyle(.bordered).padding()
@@ -294,7 +294,7 @@ struct PhotoViewer: View {
             HStack {
                 Button(exporter.savedIDs.contains(current.id) ? "Erneut sichern" : "In Fotos sichern") {
                     exporter.start(photos: [current], context: context, catalog: catalog)
-                }.buttonStyle(.borderedProminent).disabled(exporter.isRunning)
+                }.buttonStyle(.borderedProminent).disabled(!exporter.canStart)
                 Button(boxes ? "Rahmen aus" : "Rahmen ein") { boxes.toggle() }.buttonStyle(.bordered)
                 Button("Löschen", role: .destructive) { confirmDelete = true }.buttonStyle(.bordered)
                     .disabled(exporter.isRunning)

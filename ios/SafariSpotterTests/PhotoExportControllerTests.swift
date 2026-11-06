@@ -15,6 +15,7 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertTrue(exporter.isRunning, "Der Schutz muss vor dem ersten Task-Wechsel aktiv sein")
         XCTAssertFalse(exporter.start(photos: [first], context: context, catalog: catalog))
         XCTAssertFalse(exporter.retry())
+        XCTAssertFalse(exporter.discardFailedJob(), "Ein laufender Auftrag darf nicht freigegeben werden")
         await exporter.waitUntilIdle()
         XCTAssertEqual(writes, [first.id, second.id])
         XCTAssertEqual(exporter.completed, 2)
@@ -44,6 +45,9 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertEqual(exporter.savedIDs, [first.id])
         XCTAssertNotNil(exporter.lastError)
         XCTAssertTrue(exporter.canRetry)
+        XCTAssertFalse(exporter.canStart)
+        XCTAssertFalse(exporter.start(photos: [third], context: context, catalog: catalog), "Ein Einzelbild darf die offene Restliste nicht ersetzen")
+        XCTAssertEqual(exporter.remainingCount, 2)
         // Eine erst nach dem Fehler hinzugefügte geschützte Sichtung muss beim Wiederholen berücksichtigt werden.
         let rhino = addSighting("Breitmaulnashorn", position: coarsePosition)
         rhino.t = first.t
@@ -81,7 +85,37 @@ final class PhotoExportControllerTests: StoreTestCase {
         XCTAssertEqual(exporter.completed, 1)
         XCTAssertEqual(exporter.savedIDs, [first.id])
         XCTAssertTrue(exporter.lastError?.contains("nicht mehr in der App") == true)
-        XCTAssertTrue(exporter.canRetry)
+        XCTAssertFalse(exporter.canRetry, "Wiederholen kann ein gelöschtes Foto nicht wiederherstellen")
+        XCTAssertTrue(exporter.hasPendingJob)
+        XCTAssertFalse(exporter.canStart)
+    }
+
+    @MainActor
+    func testDiscardingFailedJobReleasesNextExportWithoutRemovingOriginals() async throws {
+        let first = addPhoto(species: ["Elefant"], sightingIds: [])
+        let second = addPhoto(species: ["Leopard"], sightingIds: [])
+        var fail = true
+        var writes: [UUID] = []
+        let exporter = PhotoExportController { photo, _, _ in
+            if fail { throw PhotoExporter.ExportError.metadata }
+            writes.append(photo.id)
+        }
+        exporter.start(photos: [first], context: context, catalog: catalog)
+        await exporter.waitUntilIdle()
+        XCTAssertTrue(exporter.hasPendingJob)
+        XCTAssertFalse(exporter.canRetry, "Ein defektes Bild kann nicht unverändert erneut kodiert werden")
+        XCTAssertFalse(exporter.start(photos: [second], context: context, catalog: catalog))
+        XCTAssertTrue(exporter.discardFailedJob())
+        XCTAssertTrue(exporter.canStart)
+        XCTAssertNil(exporter.lastError)
+        XCTAssertEqual(exporter.remainingCount, 0)
+        XCTAssertEqual(exporter.total, 0)
+        XCTAssertTrue(exporter.savedIDs.isEmpty)
+        fail = false
+        XCTAssertTrue(exporter.start(photos: [second], context: context, catalog: catalog))
+        await exporter.waitUntilIdle()
+        XCTAssertEqual(writes, [second.id])
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<PhotoItem>()), 2)
     }
 
     @MainActor

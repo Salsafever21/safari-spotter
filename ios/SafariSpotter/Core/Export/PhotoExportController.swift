@@ -14,13 +14,16 @@ final class PhotoExportController: ObservableObject {
     @Published private(set) var currentID: UUID?
     @Published private(set) var savedIDs: Set<UUID> = []
     @Published private(set) var lastError: String?
+    @Published private var retryBlocked = false
     private var remaining: [UUID] = []
     private var context: ModelContext?
     private var catalog: SpeciesCatalog?
     private var task: Task<Void, Never>?
     private let writer: Writer
 
-    var canRetry: Bool { !isRunning && !remaining.isEmpty && lastError != nil }
+    var hasPendingJob: Bool { !isRunning && !remaining.isEmpty && lastError != nil }
+    var canRetry: Bool { hasPendingJob && !retryBlocked }
+    var canStart: Bool { !isRunning && !hasPendingJob }
     var remainingCount: Int { remaining.count }
 
     init(writer: @escaping Writer = { photo, times, catalog in
@@ -29,7 +32,7 @@ final class PhotoExportController: ObservableObject {
 
     @discardableResult
     func start(photos: [PhotoItem], context: ModelContext, catalog: SpeciesCatalog) -> Bool {
-        guard !isRunning else { return false }
+        guard canStart else { return false }
         var seen: Set<UUID> = []
         let ids = photos.map(\.id).filter { seen.insert($0).inserted }
         guard !ids.isEmpty else { return false }
@@ -44,10 +47,19 @@ final class PhotoExportController: ObservableObject {
         return launch()
     }
 
+    /// Nur den fehlgeschlagenen Auftrag beenden, niemals Originalfotos oder gesicherte Mediathek-Kopien entfernen.
+    @discardableResult
+    func discardFailedJob() -> Bool {
+        guard hasPendingJob else { return false }
+        remaining = []; context = nil; catalog = nil; task = nil
+        total = 0; completed = 0; savedIDs = []; lastError = nil; retryBlocked = false
+        return true
+    }
+
     private func launch() -> Bool {
         guard let context, let catalog, !remaining.isEmpty else { return false }
         // Synchron vor dem Task setzen: auch zwei schnelle Taps können nicht parallel starten.
-        isRunning = true; lastError = nil
+        isRunning = true; lastError = nil; retryBlocked = false
         task = Task {
             defer { isRunning = false; currentID = nil }
             do {
@@ -63,6 +75,9 @@ final class PhotoExportController: ObservableObject {
                 }
                 self.context = nil; self.catalog = nil
             } catch {
+                // Ein gelöschtes oder nicht kodierbares Foto wird durch erneutes Tippen nicht wiederhergestellt.
+                if error is ExportError { retryBlocked = true }
+                if case .metadata? = error as? PhotoExporter.ExportError { retryBlocked = true }
                 lastError = "\(completed) von \(total) Fotos gesichert. \(error.localizedDescription)"
             }
         }
@@ -74,6 +89,6 @@ final class PhotoExportController: ObservableObject {
 
     enum ExportError: LocalizedError {
         case missingPhoto
-        var errorDescription: String? { "Ein noch offenes Foto ist nicht mehr in der App vorhanden. Starte bei Bedarf einen neuen Export mit den verbleibenden Fotos." }
+        var errorDescription: String? { "Ein noch offenes Foto ist nicht mehr in der App vorhanden. Beende diesen Exportauftrag, bevor du eine neue Auswahl sicherst." }
     }
 }
