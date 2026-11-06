@@ -1,5 +1,6 @@
 data/
 node_modules
+.venv/
 embeddings*.json
 embeddings*.bin
 yolo/dataset/

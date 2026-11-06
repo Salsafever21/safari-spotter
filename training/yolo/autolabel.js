@@ -20,7 +20,7 @@ function hash(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(
   const classes = spec.classes.filter((c) => !c.negative);
   const names = classes.map((c) => c.key);
   for (const split of ['train', 'val']) { fs.mkdirSync(path.join(OUT, 'images', split), { recursive: true }); fs.mkdirSync(path.join(OUT, 'labels', split), { recursive: true }); }
-  let n = 0, boxed = 0, fallback = 0; const t0 = Date.now();
+  let n = 0, boxed = 0, fallback = 0, negatives = 0; const t0 = Date.now();
   for (const [ci, c] of classes.entries()) {
     const dir = path.join(DATA, c.key); if (!fs.existsSync(dir)) continue;
     let files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg')).sort();
@@ -50,8 +50,24 @@ function hash(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(
     }
     console.log(c.key.padEnd(22), files.length, 'Bilder');
   }
+  // Die vier "Anderes"-Klassen sind harte Gegenbeispiele: Hund, Hausrind, Ziege und Esel
+  // sollen keine Safari-Tier-Box auslösen. YOLO nutzt dafür ein leeres Label pro Bild.
+  for (const c of spec.classes.filter((item) => item.negative)) {
+    const dir = path.join(DATA, c.key); if (!fs.existsSync(dir)) continue;
+    let files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg')).sort();
+    if (limit) files = files.slice(0, limit);
+    for (const f of files) {
+      const split = hash(c.key + '/' + f) < 0.15 ? 'val' : 'train';
+      const stem = c.key + '_' + path.basename(f, '.jpg');
+      fs.writeFileSync(path.join(OUT, 'labels', split, stem + '.txt'), '');
+      const link = path.join(OUT, 'images', split, stem + '.jpg');
+      try { fs.symlinkSync(path.join(dir, f), link); } catch (e) { /* existiert */ }
+      negatives++;
+    }
+    console.log(c.key.padEnd(22), files.length, 'Gegenbeispiele');
+  }
   const yaml = `# YOLO-Datensatz Safari Spotter (Auto-Labels aus COCO-SSD, Art aus dem Ordnernamen)\npath: ${OUT}\ntrain: images/train\nval: images/val\nnames:\n` + names.map((k, i) => `  ${i}: ${k}`).join('\n') + '\n';
   fs.writeFileSync(path.join(__dirname, 'dataset.yaml'), yaml);
   fs.writeFileSync(path.join(__dirname, 'classes.json'), JSON.stringify(classes.map((c) => ({ key: c.key, name: c.name, group: c.group || null })), null, 1));
-  console.log(`fertig: ${n} Bilder, ${boxed} mit Detektor-Box, ${fallback} mit Rückfall-Box, ${((Date.now() - t0) / 1000).toFixed(0)} s -> ${OUT}`);
+  console.log(`fertig: ${n} Tierbilder, ${boxed} mit Detektor-Box, ${fallback} mit Rückfall-Box, ${negatives} Gegenbeispiele, ${((Date.now() - t0) / 1000).toFixed(0)} s -> ${OUT}`);
 })().catch((e) => { console.error(e); process.exit(1); });

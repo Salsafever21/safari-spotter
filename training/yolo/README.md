@@ -8,9 +8,10 @@ Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht eine
 
 ## Ablauf
 
-1. **Fotos holen** (falls `training/data/` fehlt), wie fürs Artenmodell:
+1. **Fotos holen** (falls `training/data/` fehlt), wie fürs Artenmodell. Der Downloader nimmt nur CC0-/CC-BY-Fotos,
+   schreibt Lizenz und Urheber in `manifest.json` und kann nach Netzfehlern erneut gestartet werden:
    ```
-   cd training && pip install -r requirements.txt && python download.py
+   cd training && python3 download.py --per-class 80
    ```
 2. **Auto-Labeln**: Der vorhandene COCO-Detektor zeichnet die Rahmen, die Art kommt aus dem Ordnernamen.
    ```
@@ -18,7 +19,8 @@ Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht eine
    ```
    Ergebnis: `training/yolo/dataset/{images,labels}/{train,val}` (Bilder als Symlinks, 15 % Validierung, deterministisch
    nach Dateiname), `dataset.yaml` (mit absolutem Pfad, also auf dem Rechner ausführen, der auch trainiert) und `classes.json`.
-   Auf 16 000 Bildern dauert das auf einer CPU rund eine Stunde. Probelauf: `node yolo/autolabel.js --limit 20`.
+   Die vier Klassen Hausrind, Hausziege, Haushund und Esel werden mit leeren Labels als Gegenbeispiele aufgenommen.
+   Probelauf: `node yolo/autolabel.js --limit 20`.
 
    Was die Auto-Labels können und was nicht:
    - Rund 85 % der Bilder bekommen eine echte Detektor-Box, der Rest (vor allem Reptilien, Vögel am Boden, Pinguine) eine
@@ -29,7 +31,8 @@ Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht eine
      korrigiert vor allem die Rückfall-Boxen.
 3. **Trainieren und exportieren** (Mac, Apple Silicon):
    ```
-   pip install ultralytics coremltools
+   uv venv training/.venv --python 3.11
+   uv pip install --python training/.venv/bin/python ultralytics coremltools
    cd training/yolo && ./train_mac.sh yolo11n 60 640
    ```
    `yolo11n` ist das kleinste Modell (Echtzeit auf dem iPhone, Ziel 25 bis 30 fps bei 640 px), `yolo11s` ist genauer und
@@ -51,9 +54,9 @@ Alles hier ist vorbereitet, aber noch nicht trainiert (das Training braucht eine
 
 ## Was zu erwarten ist
 
-- Nach 60 Epochen auf den Auto-Labels liegt ein yolo11n erfahrungsgemäss bei mAP50 um 0,7 bis 0,8 über alle 61 Arten; die
-  verwechslungsanfälligen Paare (Löwe männlich / Löwin, Breitmaul / Spitzmaul, Kudu / Nyala) bleiben die Schwachstellen, dort
-  hilft die Gruppenregel der App (`decideSpecies`) weiter.
+- Die Validierung auf den Auto-Labels misst zunächst nur, wie gut das Modell diese Labels reproduziert. Vor dem Einbau
+  braucht es zusätzlich unabhängige Tier- und Nichttierbilder sowie einen echten Gerätetest. Verwechslungen wie
+  Löwe/Löwin, Breitmaul-/Spitzmaulnashorn und Kudu/Nyala müssen gesondert geprüft werden.
 - Der grösste Gewinn ist bei fernen, kleinen Tieren und bei Tieren, die COCO nicht kennt (Warzenschwein, Erdmännchen,
   Krokodil, Strauss), weil der COCO-Detektor sie heute oft gar nicht erst findet.
 - Für die Web-App lässt sich dasselbe Modell mit `yolo export format=tfjs` exportieren; der JS-Pfad müsste dann analog zum

@@ -24,7 +24,7 @@ Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanif
 
 ```
 cd training && npm install
-python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY/CC-BY-NC), Liste in species.json
+python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY), Liste in species.json
 node embed.js                  # MobileNet-Embeddings mit demselben Graph wie im Browser
 node train.js                  # Kopf trainieren, Bericht in report.json, Export nach ../models/head/<version>/
 ```
