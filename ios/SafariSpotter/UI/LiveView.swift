@@ -233,6 +233,7 @@ struct CameraPreview: UIViewRepresentable {
 /// Rahmen und Namen über dem Kamerabild (gleiche Optik wie die Web-App)
 struct OverlayView: View {
     @ObservedObject var camera: CameraController
+    @EnvironmentObject private var settings: AppSettings
     static let colors: [Color] = TrackPalette.hex.map { Color(hex: $0) }   // gleiche Farben wie im eingebrannten Video
     var body: some View {
         GeometryReader { geo in
@@ -244,13 +245,15 @@ struct OverlayView: View {
                     let color = Self.colors[t.colorIndex]
                     RoundedRectangle(cornerRadius: 10).strokeBorder(color, style: StrokeStyle(lineWidth: 2.2, dash: t.sure ? [] : [7, 5]))
                         .frame(width: r.width, height: r.height).offset(x: r.minX, y: r.minY)
-                    HStack(spacing: 7) { Text(t.name).font(.system(size: 14, weight: .semibold)); Text(t.sub).font(.system(size: 11, weight: .medium)).opacity(0.75) }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(t.sure ? color : Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 7))
-                        .foregroundStyle(t.sure ? Color.black : Color.white)
-                        .offset(x: r.minX, y: max(0, r.minY - 30))
+                    if settings.labels {
+                        HStack(spacing: 7) { Text(t.name).font(.system(size: 14, weight: .semibold)); Text(t.sub).font(.system(size: 11, weight: .medium)).opacity(0.75) }
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(t.sure ? color : Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 7))
+                            .foregroundStyle(t.sure ? Color.black : Color.white)
+                            .offset(x: r.minX, y: max(0, r.minY - 30))
+                    }
                 }
-                if camera.tracking, let h = camera.hint, CACurrentMediaTime() < h.until, camera.tracks.isEmpty {
+                if camera.tracking, settings.labels, let h = camera.hint, CACurrentMediaTime() < h.until, camera.tracks.isEmpty {
                     Text("\(h.name)  \(Int(min(h.conf, 0.99) * 100)) %").font(.system(size: 15, weight: .semibold)).padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Self.colors[0], lineWidth: 1.5))
                         .position(x: geo.size.width / 2, y: geo.size.height * 0.62)
