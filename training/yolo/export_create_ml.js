@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { boxFitsImage } = require('./box_geometry');
 
 function annotationFromYolo(contents, classes) {
   return contents.trim().split('\n').filter(Boolean).map((row) => {
@@ -9,7 +10,9 @@ function annotationFromYolo(contents, classes) {
     const [index, x, y, width, height] = values;
     if (values.length !== 5 || !Number.isInteger(index) || !classes[index] ||
         [x, y, width, height].some((v) => !Number.isFinite(v) || v < 0 || v > 1) ||
-        width <= 0 || height <= 0) throw new Error('Ungültiges YOLO-Label: ' + row);
+        width <= 0 || height <= 0 || !boxFitsImage(x, y, width, height)) {
+      throw new Error('Ungültiges YOLO-Label: ' + row);
+    }
     return { label: classes[index], coordinates: { x, y, width, height } };
   });
 }

@@ -40,7 +40,8 @@ wird dafür in Apples JSON-Format exportiert. Leistung und Erkennungsqualität d
    verschiebt das bisherige Label nach `dataset/excluded/`. Das Originalbild und die alte Beschriftung bleiben erhalten.
    `dataset/label-review.json` listet Bilder mit Rückfall-Box und Bildern mit mehreren Tier-Boxen zur gezielten Sichtprüfung.
    Der COCO-Detektor darf deutliche Fremdarten (Elefant, Zebra, Giraffe) nicht als Box einer anderen Art übernehmen;
-   für Vogelklassen gelten nur Vogel-Boxen. Diese Filter können zusätzliche Rückfall-Boxen erzeugen.
+   für Vogelklassen gelten nur Vogel-Boxen. Boxen am Bildrand werden auf die sichtbare Bildfläche begrenzt.
+   Diese Filter können zusätzliche Rückfall-Boxen erzeugen.
    Der vollständige Audit verweigert das Training, solange Bilder aus dieser Prüfliste nicht ausdrücklich am Foto
    geprüft wurden. Nach dem Prüfen und gegebenenfalls Korrigieren der YOLO-Labeldatei:
    ```

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { eligibleFiles, isValidation, ambiguousSources } = require('../dataset');
 const { approvalMatches } = require('./review_label');
+const { boxFitsImage } = require('./box_geometry');
 
 const HERE = __dirname;
 const DATA = path.resolve(HERE, '..', 'data');
@@ -60,7 +61,9 @@ for (const split of ['train', 'val']) {
       const values = row.trim().split(/\s+/).map(Number);
       if (values.length !== 5 || values[0] !== classes.indexOf(key) ||
           values.slice(1).some((v) => !Number.isFinite(v) || v < 0 || v > 1) ||
-          values[3] <= 0 || values[4] <= 0) errors.push('Ungültige YOLO-Box: ' + label);
+          values[3] <= 0 || values[4] <= 0 || !boxFitsImage(...values.slice(1))) {
+        errors.push('Ungültige YOLO-Box: ' + label);
+      }
     }
     counts[key][split]++;
     labels++;

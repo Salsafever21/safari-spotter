@@ -8,6 +8,7 @@ const tf = require('@tensorflow/tfjs-node');
 const cocoSsd = require('@tensorflow-models/coco-ssd');
 const { isValidation, eligibleFiles, retireStaleLinks } = require('../dataset');
 const { acceptsPrediction } = require('./detection_filter');
+const { normaliseBox } = require('./box_geometry');
 const ROOT = path.resolve(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'training', 'data');
 const OUT = path.join(__dirname, 'dataset');
@@ -92,7 +93,14 @@ function writeLabel(file, lines) {
         boxes = [[W * 0.1, H * 0.1, W * 0.8, H * 0.8]]; fallback++;
         fallbackFiles.add(relative);
       }
-      const lines = boxes.map(([x, y, w, h]) => { const cx = Math.min(1, Math.max(0, (x + w / 2) / W)), cy = Math.min(1, Math.max(0, (y + h / 2) / H)); return `${ci} ${cx.toFixed(5)} ${cy.toFixed(5)} ${Math.min(1, w / W).toFixed(5)} ${Math.min(1, h / H).toFixed(5)}`; });
+      let normalized = boxes.map((box) => normaliseBox(box, W, H)).filter(Boolean);
+      if (!normalized.length) {
+        normalized = [normaliseBox([W * 0.1, H * 0.1, W * 0.8, H * 0.8], W, H)];
+        fallbackFiles.add(relative);
+        if (animals.length) { boxed--; fallback++; }
+      }
+      const lines = normalized.map(([cx, cy, w, h]) =>
+        `${ci} ${cx.toFixed(5)} ${cy.toFixed(5)} ${w.toFixed(5)} ${h.toFixed(5)}`);
       ensureLink(path.join(dir, f), link);
       writeLabel(label, lines.join('\n') + '\n');
       n++;
