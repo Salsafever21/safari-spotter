@@ -23,7 +23,10 @@ Prüfliste zeigen Speicherfehler an, statt sie zu verbergen. Ein Game Drive wird
 die laufende Route wird atomar zwischengespeichert. Beim Hintergrundwechsel werden die letzten GPS-Punkte gesichert.
 Ein abgeschlossener Drive wird beim Neustart mit der SwiftData-Datenbank abgeglichen, falls die letzte JSON-Datei veraltet ist.
 Fahrtspuren und Foto-Markierungen werden bei der Sicherung streng geprüft; beschädigte Daten lassen die Sicherung mit
-einem Fehler abbrechen, statt unbemerkt zu fehlen. Für diesen Stand bestanden 51 Simulator-Tests.
+einem Fehler abbrechen, statt unbemerkt zu fehlen. Die Mediathek-Analyse verarbeitet bis zu zehn ausgewählte Fotos
+nacheinander; jedes Bild wird einzeln gespeichert oder übersprungen. Lade- und Modellfehler werden angezeigt, und ein
+Speicherfehler lässt den aktuellen Schritt zur Wiederholung offen. Für diesen Stand bestanden 51 Logiktests und ein
+UI-Test mit zwei ausgewählten Fotos im Simulator.
 
 ## Bauen
 

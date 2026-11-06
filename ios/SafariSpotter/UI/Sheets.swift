@@ -385,37 +385,79 @@ struct PhotoAnalysisView: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var result: (image: UIImage, dets: [PhotoDet], meta: (date: Date?, coord: CLLocationCoordinate2D?))?
     @State private var busy = false
+    @State private var currentIndex = 0
+    @State private var analysisID = UUID()
+    @State private var analysisError: String?
+    @State private var analysisPipeline: VisionPipeline?
     var body: some View {
         NavigationStack {
             VStack {
                 if initialPhoto == nil {
-                    PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .images) { Label("Bilder auswählen", systemImage: "photo.on.rectangle") }.buttonStyle(.borderedProminent)
+                    PhotosPicker(selection: $picked, maxSelectionCount: 10, matching: .images) { Label("Bilder auswählen", systemImage: "photo.on.rectangle") }
+                        .buttonStyle(.borderedProminent).disabled(busy)
+                    if !picked.isEmpty { Text("Bild \(currentIndex + 1) von \(picked.count)").font(.caption).foregroundStyle(.secondary) }
                 } else { Text("Foto in der Galerie gesichert").font(.caption).foregroundStyle(.secondary) }
                 if busy { ProgressView("Analysiere …") }
+                if let analysisError { Text(analysisError).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
                 if let r = result {
                     ZStack(alignment: .topLeading) {
                         Image(uiImage: r.image).resizable().scaledToFit()
                     }
                     List(Array(r.dets.enumerated()), id: \.offset) { _, d in HStack { Text(d.name ?? "Tier").bold(); Spacer(); Text("\(Int(min(d.conf, 0.99) * 100)) %") } }
-                    if r.dets.isEmpty {
-                        Text("Kein Tier erkannt. Das Foto bleibt in der Galerie.").font(.caption).foregroundStyle(.secondary)
+                    if r.dets.isEmpty && analysisError == nil {
+                        Text(initialPhoto == nil ? "Kein Tier erkannt. Mit «Foto behalten» wird es in der Galerie gespeichert." : "Kein Tier erkannt. Das Foto bleibt in der Galerie.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Button(r.dets.isEmpty ? "Foto behalten" : "Als Sichtung speichern") { save(r) }.buttonStyle(.borderedProminent)
+                    Button(r.dets.isEmpty ? "Foto behalten" : "Als Sichtung speichern") { save(r) }
+                        .buttonStyle(.borderedProminent).disabled(busy)
+                }
+                if initialPhoto == nil && !picked.isEmpty && !busy {
+                    Button(currentIndex + 1 < picked.count ? "Dieses Bild überspringen" : "Auswahl beenden") { advance() }
+                        .buttonStyle(.bordered)
                 }
                 Spacer()
             }
             .navigationTitle("Bildanalyse").toolbar { Button("Fertig") { dismiss() } }
-            .onChange(of: picked) { Task { await analyze() } }
-            .task(id: initialPhoto?.id) { if let initialPhoto { await analyze(data: initialPhoto.image, capturedAt: initialPhoto.t) } }
+            .onChange(of: picked) { _, _ in currentIndex = 0; startSelection() }
+            .task(id: initialPhoto?.id) { if let initialPhoto { await startCapturedAnalysis(initialPhoto) } }
+            .onDisappear { analysisID = UUID() }
         }
     }
-    private func analyze() async {
-        guard let item = picked.first, let data = try? await item.loadTransferable(type: Data.self) else { return }
-        await analyze(data: data)
+    private func startSelection() {
+        guard picked.indices.contains(currentIndex) else { result = nil; return }
+        let item = picked[currentIndex], id = UUID()
+        analysisID = id; result = nil; analysisError = nil; busy = true
+        Task {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                await analyze(data: data, id: id)
+            } catch {
+                if analysisID == id {
+                    analysisError = "Bild konnte nicht geladen werden: \(error.localizedDescription)"
+                    busy = false
+                }
+            }
+        }
     }
-    private func analyze(data: Data, capturedAt: Date? = nil) async {
-        guard let ui = UIImage(data: data) else { return }
-        busy = true; defer { busy = false }
+    private func startCapturedAnalysis(_ photo: PhotoItem) async {
+        let id = UUID()
+        analysisID = id; result = nil; analysisError = nil; busy = true
+        await analyze(data: photo.image, capturedAt: photo.t, id: id)
+    }
+    private func advance() {
+        guard initialPhoto == nil, currentIndex + 1 < picked.count else { dismiss(); return }
+        currentIndex += 1
+        startSelection()
+    }
+    private func analyze(data: Data, capturedAt: Date? = nil, id: UUID) async {
+        await Task.yield()
+        defer { if analysisID == id { busy = false } }
+        guard let ui = UIImage(data: data) else {
+            if analysisID == id { analysisError = "Dieses Bild konnte nicht geöffnet werden." }
+            return
+        }
         // EXIF
         var date: Date? = capturedAt, coord: CLLocationCoordinate2D? = nil
         if capturedAt == nil, let src = CGImageSourceCreateWithData(data as CFData, nil), let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
@@ -424,24 +466,43 @@ struct PhotoAnalysisView: View {
             }
             if let e = props[kCGImagePropertyExifDictionary] as? [CFString: Any], let s = e[kCGImagePropertyExifDateTimeOriginal] as? String { let f = DateFormatter(); f.dateFormat = "yyyy:MM:dd HH:mm:ss"; date = f.date(from: s) }
         }
-        guard let pipeline = try? VisionPipeline(catalog: catalog), let cg = ui.cgImage else { return }
-        // Aufrecht und mit Ursprung (0, 0), damit die Ausschnitte in VisionPipeline in App-Koordinaten stimmen
-        let ci = VisionPipeline.uprightImage(cg, exifOrientation: Int32(ui.imageOrientation.exifValue))
-        let size = ci.extent.size
-        let region = drive.currentRegion(setting: settings.region)
         var dets: [PhotoDet] = []
-        if let raw = try? pipeline.detectAll(in: ci, visible: CGRect(origin: .zero, size: size), threshold: settings.threshold, tiles: 3) {
+        do {
+            let pipeline: VisionPipeline
+            if let cached = analysisPipeline { pipeline = cached }
+            else { pipeline = try VisionPipeline(catalog: catalog); analysisPipeline = pipeline }
+            guard let cg = ui.cgImage else { throw CocoaError(.fileReadCorruptFile) }
+            // Aufrecht und mit Ursprung (0, 0), damit die Ausschnitte in VisionPipeline in App-Koordinaten stimmen
+            let ci = VisionPipeline.uprightImage(cg, exifOrientation: Int32(ui.imageOrientation.exifValue))
+            let size = ci.extent.size
+            let region = drive.currentRegion(setting: settings.region)
+            let raw = try pipeline.detectAll(in: ci, visible: CGRect(origin: .zero, size: size), threshold: settings.threshold, tiles: 3)
             for d in raw.prefix(10) {
                 let sq = VisionPipeline.cropSquare(d.box, in: size)
-                let dec = (try? pipeline.classify(ci, square: sq, region: region)).map { SpeciesDecision.decide($0, catalog: catalog) } ?? SpeciesDecision(name: nil, key: nil, confidence: 0, sure: false, other: false)
+                let dec: SpeciesDecision
+                do { dec = SpeciesDecision.decide(try pipeline.classify(ci, square: sq, region: region), catalog: catalog) }
+                catch {
+                    if analysisID == id { analysisError = "Artbestimmung teilweise fehlgeschlagen: \(error.localizedDescription)" }
+                    dec = SpeciesDecision(name: nil, key: nil, confidence: 0, sure: false, other: false)
+                }
                 guard d.firm || (dec.name != nil && !dec.other && dec.confidence >= 0.5) else { continue }
                 if let n = dec.name, dets.contains(where: { $0.name == n && VisionPipeline.iou(CGRect(x: $0.x, y: $0.y, width: $0.w, height: $0.h), d.box) > 0.12 }) { continue }
                 dets.append(PhotoDet(x: d.box.minX, y: d.box.minY, w: d.box.width, h: d.box.height, name: dec.name, conf: dec.confidence, sure: dec.sure))
             }
+        } catch {
+            if analysisID == id { analysisError = "Tiererkennung fehlgeschlagen: \(error.localizedDescription). Das Foto kann trotzdem gespeichert werden." }
         }
-        result = (ui, dets, (date, coord))
+        if analysisID == id { result = (ui, dets, (date, coord)) }
     }
     private func save(_ r: (image: UIImage, dets: [PhotoDet], meta: (date: Date?, coord: CLLocationCoordinate2D?))) {
+        let encodedDets: Data
+        do { encodedDets = try JSONEncoder().encode(r.dets) }
+        catch { analysisError = "Fotomarkierungen konnten nicht vorbereitet werden: \(error.localizedDescription)"; return }
+        let jpeg = initialPhoto == nil ? r.image.jpegData(compressionQuality: 0.88) : nil
+        guard initialPhoto != nil || jpeg != nil else {
+            analysisError = "Foto konnte nicht als JPEG gespeichert werden."
+            return
+        }
         var ids: [UUID] = [], names: [String] = []
         var counts: [String: (Int, String?)] = [:]
         for d in r.dets { if let n = d.name { counts[n] = ((counts[n]?.0 ?? 0) + 1, catalog.cls(name: n)?.key) } }
@@ -451,21 +512,24 @@ struct PhotoAnalysisView: View {
             let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) } ?? drive.lastFix.map { Position.from($0, sensitive: sensitive) }
             let s = Sighting(name: name, key: key, t: r.meta.date ?? .now, n: n, position: pos, thumb: nil, src: "photo"); context.insert(s); ids.append(s.id)
         }
-        if let jpeg = r.image.jpegData(compressionQuality: 0.88) {
-            let sensitive = names.contains { catalog.isSensitive(name: $0) }
-            let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) }
-                ?? (initialPhoto == nil ? nil : drive.lastFix.map { Position.from($0, sensitive: sensitive) })
-            if let initialPhoto {
-                initialPhoto.species = names
-                initialPhoto.detsJSON = try? JSONEncoder().encode(r.dets)
-                initialPhoto.sightingIds = ids
-                initialPhoto.lat = pos?.lat; initialPhoto.lon = pos?.lon; initialPhoto.coarse = pos?.coarse ?? false
-            } else {
-                context.insert(PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids))
-            }
+        let sensitive = names.contains { catalog.isSensitive(name: $0) }
+        let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) }
+            ?? (initialPhoto == nil ? nil : drive.lastFix.map { Position.from($0, sensitive: sensitive) })
+        if let initialPhoto {
+            initialPhoto.species = names
+            initialPhoto.detsJSON = encodedDets
+            initialPhoto.sightingIds = ids
+            initialPhoto.lat = pos?.lat; initialPhoto.lon = pos?.lon; initialPhoto.coarse = pos?.coarse ?? false
+        } else if let jpeg {
+            let photo = PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids)
+            photo.detsJSON = encodedDets
+            context.insert(photo)
         }
-        do { try context.save(); dismiss() }
-        catch { camera.lastError = "Bildanalyse konnte nicht gespeichert werden: \(error.localizedDescription)" }
+        do { try context.save(); advance() }
+        catch {
+            context.rollback()
+            analysisError = "Bildanalyse konnte nicht gespeichert werden: \(error.localizedDescription)"
+        }
     }
 }
 

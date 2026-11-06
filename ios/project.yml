@@ -33,7 +33,7 @@ targets:
         type: file
         buildPhase: sources
     scheme:
-      testTargets: [SafariSpotterTests]
+      testTargets: [SafariSpotterTests, SafariSpotterUITests]
     info:
       path: SafariSpotter/Info.plist
       properties:
@@ -69,3 +69,14 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter.tests
+  SafariSpotterUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SafariSpotterUITests
+    dependencies:
+      - target: SafariSpotter
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter.uitests
