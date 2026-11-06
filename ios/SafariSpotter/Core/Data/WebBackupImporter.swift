@@ -40,7 +40,8 @@ enum WebBackupImporter {
             .appendingPathComponent("WebBackups", isDirectory: true)
     }
 
-    static func perform(url: URL, context: ModelContext, archivedSource: URL? = nil) throws -> Result {
+    static func perform(url: URL, context: ModelContext, archivedSource: URL? = nil,
+                        retainedArchiveURL: URL? = nil) throws -> Result {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
@@ -87,13 +88,21 @@ enum WebBackupImporter {
         }
         guard cursor == binaryLength else { throw ImportError.invalid("Fotodaten unvollständig") }
 
-        let folder = try archiveFolder()
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let archiveHash = try archivedSource.map(fileDigest)
-            ?? SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-        let destination = folder.appendingPathComponent("\(archiveHash)\(archivedSource == nil ? "" : "-encrypted").ssbackup")
-        if !FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.copyItem(at: archivedSource ?? url, to: destination)
+        let destination: URL
+        if let retainedArchiveURL {
+            guard try EncryptedBackup.isStructurallyComplete(retainedArchiveURL) else {
+                throw ImportError.invalid("Archivdatei")
+            }
+            destination = retainedArchiveURL
+        } else {
+            let folder = try archiveFolder()
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let archiveHash = try archivedSource.map(fileDigest)
+                ?? SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            destination = folder.appendingPathComponent("\(archiveHash)\(archivedSource == nil ? "" : "-encrypted").ssbackup")
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.copyItem(at: archivedSource ?? url, to: destination)
+            }
         }
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
 

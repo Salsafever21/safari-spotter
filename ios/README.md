@@ -87,13 +87,16 @@ In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsd
 Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
 Import keine Duplikate an. Für spätere Sicherungen unter **Einstellungen → Daten sichern** ein Passwort mit mindestens
 12 Zeichen vergeben, danach über **Teilen** eine Kopie ausserhalb der App sichern. Fertige verschlüsselte Sicherungen
-bleiben im geschützten App-Speicher auch nach einem Neustart verfügbar und können einzeln geteilt oder entfernt werden.
+bleiben im geschützten App-Speicher auch nach einem Neustart verfügbar und können einzeln direkt wiederhergestellt,
+geteilt oder entfernt werden. Die direkte Wiederherstellung behält die verschlüsselte Datei und erzeugt keine zweite
+Archivkopie im App-Speicher.
 Beim Öffnen der Einstellungen übernimmt die App auch vollständig geschriebene temporäre Sicherungen aus früheren Builds;
 unvollständige Dateien werden erkannt und nicht als fertige Sicherung angeboten.
 Beim Löschen der App verschwinden diese lokalen Kopien; die externe Kopie bleibt deshalb wichtig. Die iOS-App verschlüsselt die
 gesamte Datei, einschliesslich aller Clip-Dateien, mit einem zufälligen Salt, PBKDF2-HMAC-SHA256 und AES-256-GCM in Blöcken.
-Die Sicherung lässt sich erst starten, wenn eine laufende Videoaufnahme vollständig gespeichert ist. Zum Wiederherstellen dieselbe Datei
-importieren und das Passwort eingeben. Ohne Passwort ist eine Wiederherstellung nicht möglich; die App speichert es nicht.
+Die Sicherung lässt sich erst starten, wenn eine laufende Videoaufnahme vollständig gespeichert ist. Zum Wiederherstellen
+bei einer lokalen Sicherung **Wiederherstellen** wählen oder eine externe Datei importieren und das Passwort eingeben.
+Ohne Passwort ist eine Wiederherstellung nicht möglich; die App speichert es nicht.
 Die unverschlüsselten Originaldaten werden nach dem Erstellen der geschützten Datei aus dem temporären Speicher entfernt.
 Beim Import einer geschützten Datei bleibt im App-Archiv nur die verschlüsselte Originaldatei erhalten.
 

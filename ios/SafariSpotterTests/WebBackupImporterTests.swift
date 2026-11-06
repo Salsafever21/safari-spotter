@@ -31,6 +31,28 @@ final class WebBackupImporterTests: StoreTestCase {
         XCTAssertEqual(again.sightings + again.photos + again.corrections + again.drives, 0)
     }
 
+    func testLocalEncryptedArchiveIsRetainedWithoutSecondCopy() throws {
+        let (url, _) = try makeArchive(photo: StoreTestCase.jpeg())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let encrypted = try EncryptedBackup.encrypt(url, password: "Safari-Backup-Test-2026")
+        defer { try? FileManager.default.removeItem(at: encrypted) }
+        let local = try ProtectedBackupStore(directory: directory).save(encrypted)
+        let archivesBefore = Set(WebBackupImporter.archivedFiles())
+
+        let restored = try EncryptedBackup.decrypt(local, password: "Safari-Backup-Test-2026")
+        defer { try? FileManager.default.removeItem(at: restored) }
+        let result = try WebBackupImporter.perform(url: restored, context: context,
+                                                   retainedArchiveURL: local)
+
+        XCTAssertEqual(result.archiveURL, local)
+        XCTAssertEqual(result.sightings, 1)
+        XCTAssertEqual(result.photos, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertEqual(Set(WebBackupImporter.archivedFiles()), archivesBefore)
+    }
+
     func testCorruptPhotoIsRejectedBeforeWriting() throws {
         let (url, _) = try makeArchive(photo: StoreTestCase.jpeg(), corruptHash: true)
         defer { try? FileManager.default.removeItem(at: url) }

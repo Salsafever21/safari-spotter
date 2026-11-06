@@ -169,6 +169,7 @@ struct SettingsView: View {
     @State private var creatingProtectedBackup = false
     @State private var unlockingProtectedBackup = false
     @State private var pendingEncryptedURL: URL?
+    @State private var pendingEncryptedIsLocal = false
     @State private var backupBusy = false
     private let backupStore = ProtectedBackupStore()
     private var importBlocked: Bool {
@@ -252,13 +253,16 @@ struct SettingsView: View {
                             Text(ByteCountFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0), countStyle: .file))
                                 .font(.caption).foregroundStyle(.secondary)
                             HStack {
+                                Button("Wiederherstellen") { selectLocalBackup(file) }
+                                    .disabled(importBlocked)
                                 ShareLink(item: file) { Label("Teilen", systemImage: "square.and.arrow.up") }
                                 Spacer()
                                 Button("Entfernen", role: .destructive) { backupToDelete = file }
+                                    .disabled(backupBusy)
                             }
                         }
                     }
-                    Text("Enthält Sichtungen, Fotos, Videos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich mit dem Passwort später hier wieder importieren.")
+                    Text("Enthält Sichtungen, Fotos, Videos, Korrekturen, Game Drives und Einstellungen. Eine lokale Sicherung lässt sich hier mit dem Passwort direkt wiederherstellen.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Fertige Sicherungen bleiben auf diesem iPhone verfügbar. Teile eine Kopie in Dateien ausserhalb der App; beim Löschen der App verschwinden auch diese lokalen Kopien.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -301,7 +305,14 @@ struct SettingsView: View {
                     get: { backupToDelete != nil }, set: { if !$0 { backupToDelete = nil } })) {
                     Button("Lokale Sicherung entfernen", role: .destructive) {
                         if let file = backupToDelete {
-                            do { try backupStore.delete(file); protectedBackups = try backupStore.list() }
+                            do {
+                                try backupStore.delete(file)
+                                protectedBackups = try backupStore.list()
+                                if pendingEncryptedIsLocal && pendingEncryptedURL == file {
+                                    pendingEncryptedURL = nil
+                                    pendingEncryptedIsLocal = false
+                                }
+                            }
                             catch { backupMessage = error.localizedDescription }
                         }
                         backupToDelete = nil
@@ -369,8 +380,9 @@ struct SettingsView: View {
                 try? FileManager.default.removeItem(at: copy)
                 throw error
             }
-            if let old = pendingEncryptedURL { try? FileManager.default.removeItem(at: old) }
+            if let old = pendingEncryptedURL, !pendingEncryptedIsLocal { try? FileManager.default.removeItem(at: old) }
             pendingEncryptedURL = copy
+            pendingEncryptedIsLocal = false
             backupMessage = "Verschlüsselte Sicherung ausgewählt. Passwort zum Wiederherstellen eingeben."
             unlockingProtectedBackup = true
         } else {
@@ -380,9 +392,23 @@ struct SettingsView: View {
         }
     }
 
+    private func selectLocalBackup(_ file: URL) {
+        guard !importBlocked else { backupMessage = importBlockMessage; return }
+        guard protectedBackups.contains(file) else {
+            backupMessage = "Diese lokale Sicherung ist nicht mehr verfügbar."
+            return
+        }
+        if let old = pendingEncryptedURL, !pendingEncryptedIsLocal { try? FileManager.default.removeItem(at: old) }
+        pendingEncryptedURL = file
+        pendingEncryptedIsLocal = true
+        backupMessage = "Lokale Sicherung ausgewählt. Passwort zum Wiederherstellen eingeben."
+        unlockingProtectedBackup = true
+    }
+
     private func restoreProtectedBackup(_ password: String) {
         guard let encrypted = pendingEncryptedURL else { return }
         guard !importBlocked else { backupMessage = importBlockMessage; return }
+        let isLocal = pendingEncryptedIsLocal
         backupBusy = true
         backupMessage = "Sicherung wird geprüft und importiert …"
         Task {
@@ -399,7 +425,9 @@ struct SettingsView: View {
                 let clipDirectory = try NativeArchive.clipsDirectory()
                 if let extracted { try NativeArchive.checkClipCollisions(extracted, clipsDirectory: clipDirectory) }
                 let report = try WebBackupImporter.perform(url: extracted?.core ?? decrypted,
-                                                           context: context, archivedSource: encrypted)
+                                                           context: context,
+                                                           archivedSource: isLocal ? nil : encrypted,
+                                                           retainedArchiveURL: isLocal ? encrypted : nil)
                 if let extracted {
                     try await Task.detached(priority: .userInitiated) {
                         try NativeArchive.installClips(extracted, clipsDirectory: clipDirectory)
@@ -409,8 +437,9 @@ struct SettingsView: View {
                 let clipCount = extracted?.clips.filter { $0.pathExtension == "mov" }.count ?? 0
                 backupMessage = "Wiederhergestellt: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen, \(report.drives) Fahrten und \(clipCount) Videos."
                 importedArchives = WebBackupImporter.archivedFiles()
-                try? FileManager.default.removeItem(at: encrypted)
+                if !isLocal { try? FileManager.default.removeItem(at: encrypted) }
                 pendingEncryptedURL = nil
+                pendingEncryptedIsLocal = false
             } catch { backupMessage = error.localizedDescription }
             backupBusy = false
         }
