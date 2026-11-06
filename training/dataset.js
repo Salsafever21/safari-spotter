@@ -40,6 +40,12 @@ function isValidation(observation, file) {
   return hash(observation || file) < 0.15;
 }
 
+function sourceFingerprint(bytes, record) {
+  return { sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    observation: String(record.observation || 0), license: record.license || null,
+    source: record.source || null };
+}
+
 function eligibleFiles(dir, classKey, manifest) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((file) => {
@@ -83,4 +89,4 @@ function retireStaleLinks(out, data, classes, manifest) {
   return { retired, allowedSources };
 }
 
-module.exports = { isValidation, eligibleFiles, retireStaleLinks, ambiguousSources };
+module.exports = { isValidation, eligibleFiles, retireStaleLinks, ambiguousSources, sourceFingerprint };

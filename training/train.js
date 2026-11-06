@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const tf = require('@tensorflow/tfjs-node');
-const { isValidation } = require('./dataset');
+const { isValidation, eligibleFiles, sourceFingerprint } = require('./dataset');
 
 const SITE = path.resolve(__dirname, '..');
 const EMB = path.resolve(process.argv[2] || path.join(__dirname, 'embeddings.json'));
@@ -18,6 +18,22 @@ const outDir = path.join(SITE, 'models', 'head', HEAD_VERSION);
 if (fs.existsSync(outDir)) throw new Error('Modellversion existiert bereits und wird nicht überschrieben: ' + outDir);
 
 const raw = JSON.parse(fs.readFileSync(EMB, 'utf8'));
+if (!raw.sources || typeof raw.sources !== 'object') {
+  throw new Error('Embeddings ohne Quellen-Prüfsummen: ./node22.sh embed.js erneut ausführen');
+}
+const dataDir = path.join(__dirname, 'data');
+const manifest = JSON.parse(fs.readFileSync(path.join(dataDir, 'manifest.json'), 'utf8'));
+const currentFiles = spec.classes.flatMap((c) => eligibleFiles(path.join(dataDir, c.key), c.key, manifest)
+  .map((file) => c.key + '/' + file)).sort();
+if (JSON.stringify(currentFiles) !== JSON.stringify(Object.keys(raw.sources).sort())) {
+  throw new Error('Trainingsfotos oder Freigaben haben sich geändert: ./node22.sh embed.js erneut ausführen');
+}
+for (const relative of currentFiles) {
+  const actual = sourceFingerprint(fs.readFileSync(path.join(dataDir, relative)), manifest[relative]);
+  if (JSON.stringify(actual) !== JSON.stringify(raw.sources[relative])) {
+    throw new Error('Foto oder Metadaten seit Embedding verändert: ' + relative);
+  }
+}
 const dim = raw.dim;
 const buf = fs.readFileSync(path.join(path.dirname(EMB), raw.bin));
 const all = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);

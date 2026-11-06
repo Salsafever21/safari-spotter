@@ -31,6 +31,11 @@ test('a distinctive COCO animal cannot label a different species', () => {
   assert.ok(!acceptsPrediction('elefant', { class: 'zebra', score: 0.8 }));
   assert.ok(acceptsPrediction('impala', { class: 'horse', score: 0.8 }));
   assert.ok(!acceptsPrediction('impala', { class: 'bird', score: 0.8 }));
+  assert.ok(!acceptsPrediction('karakal', { class: 'horse', score: 0.8 }));
+  assert.ok(!acceptsPrediction('loewe_m', { class: 'cow', score: 0.8 }));
+  assert.ok(!acceptsPrediction('gepard', { class: 'dog', score: 0.8 }));
+  assert.ok(!acceptsPrediction('nilkrokodil', { class: 'cow', score: 0.8 }));
+  assert.ok(!acceptsPrediction('kudu', { class: 'bear', score: 0.8 }));
   assert.ok(acceptsPrediction('strauss', { class: 'bird', score: 0.8 }));
   assert.ok(!acceptsPrediction('strauss', { class: 'horse', score: 0.8 }));
 });

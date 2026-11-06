@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const tf = require('@tensorflow/tfjs-node');
 const mobilenet = require('@tensorflow-models/mobilenet');
-const { eligibleFiles } = require('./dataset');
+const { eligibleFiles, sourceFingerprint } = require('./dataset');
 
 const SITE = path.resolve(__dirname, '..');
 const DATA = path.resolve(process.argv[2] || path.join(__dirname, 'data'));
@@ -48,6 +48,7 @@ function variants(img) {
   const BIN = OUT.replace(/\.json$/, '.bin');
   const fd = fs.openSync(BIN, 'w');
   const items = [];
+  const sources = {};
   let dim = 0, n = 0;
   const t0 = Date.now();
   for (const c of spec.classes) {
@@ -57,9 +58,17 @@ function variants(img) {
     const files = eligibleFiles(dir, c.key, manifest);
     let okFiles = 0;
     for (const f of files) {
+      const relative = c.key + '/' + f;
       let img;
-      try { img = tf.node.decodeImage(fs.readFileSync(path.join(dir, f)), 3); } catch (e) { continue; }
-      if (img.shape.length !== 3 || img.shape[0] < 64 || img.shape[1] < 64) { img.dispose(); continue; }
+      try {
+        const bytes = fs.readFileSync(path.join(dir, f));
+        sources[relative] = sourceFingerprint(bytes, manifest[relative]);
+        img = tf.node.decodeImage(bytes, 3);
+      } catch (e) { throw new Error('Trainingsbild kann nicht gelesen werden: ' + relative, { cause: e }); }
+      if (img.shape.length !== 3 || img.shape[0] < 64 || img.shape[1] < 64) {
+        img.dispose();
+        throw new Error('Trainingsbild zu klein oder ungültig: ' + relative);
+      }
       const vs = variants(img); img.dispose();
       const embs = tf.tidy(() => model.infer(vs, true));
       vs.dispose();
@@ -68,13 +77,13 @@ function variants(img) {
       const nv = embs.shape[0];
       embs.dispose();
       fs.writeSync(fd, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
-      for (let v = 0; v < nv; v++) items.push({ cls: c.key, file: c.key + '/' + f, variant: v, obs: (manifest[c.key + '/' + f] || {}).observation || 0 });
+      for (let v = 0; v < nv; v++) items.push({ cls: c.key, file: relative, variant: v, obs: (manifest[relative] || {}).observation || 0 });
       okFiles++; n++;
       if (n % 1000 === 0) console.log(n, 'Bilder,', ((Date.now() - t0) / 1000).toFixed(0), 's, Tensoren im Speicher:', tf.memory().numTensors);
     }
     console.log(c.key.padEnd(22), okFiles, 'Bilder');
   }
   fs.closeSync(fd);
-  fs.writeFileSync(OUT, JSON.stringify({ dim, count: items.length, bin: path.basename(BIN), items }));
+  fs.writeFileSync(OUT, JSON.stringify({ dim, count: items.length, bin: path.basename(BIN), items, sources }));
   console.log('fertig:', items.length, 'Vektoren ×', dim, 'in', ((Date.now() - t0) / 1000).toFixed(0), 's ->', OUT, '+', BIN);
 })().catch((e) => { console.error(e); process.exit(1); });

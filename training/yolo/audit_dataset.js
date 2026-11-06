@@ -86,6 +86,7 @@ if (!partial) {
 }
 const reviewPath = path.join(OUT, 'label-review.json');
 const review = fs.existsSync(reviewPath) ? JSON.parse(fs.readFileSync(reviewPath, 'utf8')) : {};
+if (review.generatorVersion !== 2) errors.push('Labels stammen aus einer älteren Auto-Label-Version; neu erzeugen und prüfen');
 const fallback = new Set(review.fallbackFiles || []);
 const multiple = new Set(review.multipleBoxFiles || []);
 for (const relative of observedFallback) if (!fallback.has(relative)) errors.push('Rückfall-Box fehlt in Prüfliste: ' + relative);

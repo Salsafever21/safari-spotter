@@ -12,6 +12,7 @@ const { normaliseBox } = require('./box_geometry');
 const ROOT = path.resolve(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'training', 'data');
 const OUT = path.join(__dirname, 'dataset');
+const GENERATOR_VERSION = 2;
 const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'training', 'species.json'), 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));
 const limit = (() => { const i = process.argv.indexOf('--limit'); return i > 0 ? parseInt(process.argv[i + 1], 10) : 0; })();
@@ -39,14 +40,24 @@ function writeLabel(file, lines) {
       throw new Error('Klassenreihenfolge geändert: vorhandenen Datensatz separat archivieren und neu erzeugen.');
     }
   }
+  const reviewPath = path.join(OUT, 'label-review.json');
+  const priorReview = fs.existsSync(reviewPath) ? JSON.parse(fs.readFileSync(reviewPath, 'utf8')) : {};
+  const hasLabels = ['train', 'val'].some((split) => {
+    const dir = path.join(OUT, 'labels', split);
+    return fs.existsSync(dir) && fs.readdirSync(dir).some((name) => name.endsWith('.txt'));
+  });
+  if (hasLabels && priorReview.generatorVersion !== GENERATOR_VERSION && !overwrite) {
+    throw new Error('Alte Labels ohne geprüfte Detektor-Klassen: bestehende Bearbeitungen sichern und --overwrite verwenden.');
+  }
+  if (overwrite && Object.keys(priorReview.approvedFiles || {}).length) {
+    throw new Error('--overwrite würde bereits gesichtete Labels ersetzen; neuen Datensatz separat anlegen.');
+  }
   const det = await cocoSsd.load({ base: 'lite_mobilenet_v2', modelUrl: localHandler(path.join(ROOT, 'models', 'cocossd', 'model.json')) });
   for (const split of ['train', 'val']) { fs.mkdirSync(path.join(OUT, 'images', split), { recursive: true }); fs.mkdirSync(path.join(OUT, 'labels', split), { recursive: true }); }
   const { retired, allowedSources } = retireStaleLinks(OUT, DATA, spec.classes, manifest);
   writeLabel(classesFile, JSON.stringify(classes.map((c) => ({ key: c.key, name: c.name, group: c.group || null })), null, 1));
-  const reviewPath = path.join(OUT, 'label-review.json');
-  const priorReview = fs.existsSync(reviewPath) ? JSON.parse(fs.readFileSync(reviewPath, 'utf8')) : {};
-  const fallbackFiles = new Set(Array.isArray(priorReview.fallbackFiles) ? priorReview.fallbackFiles.filter((x) => allowedSources.has(x)) : []);
-  const multipleBoxFiles = new Set(Array.isArray(priorReview.multipleBoxFiles) ? priorReview.multipleBoxFiles.filter((x) => allowedSources.has(x)) : []);
+  const fallbackFiles = new Set(!overwrite && Array.isArray(priorReview.fallbackFiles) ? priorReview.fallbackFiles.filter((x) => allowedSources.has(x)) : []);
+  const multipleBoxFiles = new Set(!overwrite && Array.isArray(priorReview.multipleBoxFiles) ? priorReview.multipleBoxFiles.filter((x) => allowedSources.has(x)) : []);
   const approvedFiles = Object.fromEntries(Object.entries(priorReview.approvedFiles || {})
     .filter(([relative]) => allowedSources.has(relative)));
   let n = 0, boxed = 0, fallback = 0, negatives = 0, reused = 0; const t0 = Date.now();
@@ -129,7 +140,7 @@ function writeLabel(file, lines) {
   }
   const yaml = `# YOLO-Datensatz Safari Spotter (Auto-Labels aus COCO-SSD, Art aus dem Ordnernamen)\npath: ${OUT}\ntrain: images/train\nval: images/val\nnames:\n` + names.map((k, i) => `  ${i}: ${k}`).join('\n') + '\n';
   fs.writeFileSync(path.join(__dirname, 'dataset.yaml'), yaml);
-  writeLabel(reviewPath, JSON.stringify({ generatedAt: new Date().toISOString(),
+  writeLabel(reviewPath, JSON.stringify({ generatedAt: new Date().toISOString(), generatorVersion: GENERATOR_VERSION,
     fallbackFiles: [...fallbackFiles].sort(), multipleBoxFiles: [...multipleBoxFiles].sort(), approvedFiles }, null, 2) + '\n');
   console.log(`fertig: ${n} neue Tierbilder, ${boxed} mit Detektor-Box, ${fallback} mit Rückfall-Box, ${negatives} neue Gegenbeispiele, ${reused} bestehende Labels beibehalten, ${retired} veraltete Verknüpfungen archiviert, ${((Date.now() - t0) / 1000).toFixed(0)} s -> ${OUT}`);
 })().catch((e) => { console.error(e); process.exit(1); });

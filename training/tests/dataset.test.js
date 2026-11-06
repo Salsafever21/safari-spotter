@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { isValidation, eligibleFiles, retireStaleLinks } = require('../dataset');
+const { isValidation, eligibleFiles, retireStaleLinks, sourceFingerprint } = require('../dataset');
 
 test('all photos from one observation stay in the same split', () => {
   assert.equal(isValidation(123456, 'elefant/one.jpg'), isValidation(123456, 'leopard/two.jpg'));
@@ -119,4 +119,10 @@ test('a visually rejected photo stays on disk but leaves both training paths', (
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('embedding provenance changes with the source image or observation', () => {
+  const original = sourceFingerprint(Buffer.from('photo A'), { license: 'cc-by', observation: 12 });
+  assert.notDeepEqual(original, sourceFingerprint(Buffer.from('photo B'), { license: 'cc-by', observation: 12 }));
+  assert.notDeepEqual(original, sourceFingerprint(Buffer.from('photo A'), { license: 'cc-by', observation: 13 }));
 });

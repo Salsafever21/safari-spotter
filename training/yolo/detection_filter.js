@@ -4,6 +4,12 @@ const DISTINCT = { elephant: 'elefant', zebra: 'steppenzebra', giraffe: 'giraffe
 const BIRDS = new Set(['brillenpinguin', 'strauss', 'sekretaer', 'hornrabe', 'gelbschnabeltoko',
   'riesentrappe', 'gaukler', 'schreiseeadler', 'weissrueckengeier', 'gabelracke',
   'helmperlhuhn', 'nilgans', 'hammerkopf', 'sattelstorch', 'marabu', 'flamingo']);
+const FELIDS = new Set(['loewe_m', 'loewin', 'leopard', 'gepard', 'serval', 'karakal']);
+const CANIDS = new Set(['tuepfelhyaene', 'wildhund', 'schabrackenschakal', 'loeffelhund']);
+const UNGULATES = new Set(['breitmaulnashorn', 'spitzmaulnashorn', 'flusspferd', 'kaffernbueffel',
+  'warzenschwein', 'impala', 'streifengnu', 'kudu', 'nyala', 'buschbock', 'elenantilope',
+  'wasserbock', 'rappenantilope', 'springbock', 'oryx', 'kuhantilope', 'blessbock',
+  'steinboeckchen', 'kronenducker', 'klippspringer']);
 
 function acceptsPrediction(classKey, prediction) {
   if (!ANIMAL.has(prediction.class) || prediction.score < 0.3) return false;
@@ -11,7 +17,10 @@ function acceptsPrediction(classKey, prediction) {
   if (BIRDS.has(classKey)) return prediction.class === 'bird';
   if (prediction.class === 'bird') return false;
   if (Object.values(DISTINCT).includes(classKey)) return DISTINCT[prediction.class] === classKey;
-  return true;
+  if (FELIDS.has(classKey)) return prediction.class === 'cat';
+  if (CANIDS.has(classKey)) return prediction.class === 'dog';
+  if (UNGULATES.has(classKey)) return ['horse', 'sheep', 'cow'].includes(prediction.class);
+  return false; // COCO has no reliable corresponding class: requires a reviewed fallback box.
 }
 
 module.exports = { acceptsPrediction };
