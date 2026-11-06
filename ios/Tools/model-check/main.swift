@@ -27,7 +27,7 @@ let labelURL = modelURL.deletingLastPathComponent().appendingPathComponent("spec
 let labels = (try? Data(contentsOf: labelURL)).flatMap { try? JSONDecoder().decode(LabelFile.self, from: $0) }
 let groups = Dictionary(uniqueKeysWithValues: (labels?.classes ?? []).map { ($0.key, $0.group) })
 
-var total = 0, top1 = 0, top3 = 0, sameGroup = 0, unreadable = 0
+var total = 0, top1 = 0, top3 = 0, decided = 0, groupOutputs = 0, unreadable = 0
 var confusions: [String: Int] = [:]
 var confidentMistakes: [(String, String, String, Double)] = []
 var latencies: [Double] = []
@@ -41,7 +41,7 @@ for folder in folders {
     let photos = try fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         .filter { $0.pathExtension.lowercased() == "jpg" }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
-    var seen = 0, correct = 0, near = 0, grouped = 0
+    var seen = 0, correct = 0, near = 0, decisionCorrect = 0
     for photo in photos {
         let request = VNCoreMLRequest(model: visionModel)
         request.imageCropAndScaleOption = .scaleFill
@@ -55,7 +55,6 @@ for folder in folders {
             seen += 1
             let best = results[0].identifier
             let expectedGroup = groups[expected] ?? nil
-            let sameKnownGroup = expectedGroup != nil && (groups[best] ?? nil) == expectedGroup
             if best == expected { correct += 1 }
             else {
                 confusions["\(expected) → \(best)", default: 0] += 1
@@ -63,20 +62,33 @@ for folder in folders {
                     confidentMistakes.append((photo.lastPathComponent, expected, best, Double(results[0].confidence)))
                 }
             }
-            if best == expected || sameKnownGroup { grouped += 1 }
+            // Einzelbildregel der App: zwei nahe Arten derselben Gruppe ergeben den Sammelnamen.
+            // Tracking-Glättung und Regionsvorwissen fehlen hier bewusst.
+            var decision: String? = best
+            if let group = groups[best] ?? nil,
+               results.count > 1,
+               (groups[results[1].identifier] ?? nil) == group,
+               results[0].confidence - results[1].confidence < 0.3 {
+                decision = "group:" + group
+                groupOutputs += 1
+            } else if results[0].confidence < 0.35 {
+                decision = nil
+            }
+            if decision == expected || expectedGroup.map({ decision == "group:" + $0 }) == true {
+                decisionCorrect += 1
+            }
             if results.prefix(3).contains(where: { $0.identifier == expected }) { near += 1 }
         } catch {
             unreadable += 1
         }
     }
-    total += seen; top1 += correct; top3 += near; sameGroup += grouped
-    let groupDetail = groups.isEmpty ? "" : ", \(grouped)/\(seen) Top 1 oder gleiche Gruppe"
-    print("\(expected): \(correct)/\(seen) Top 1, \(near)/\(seen) Top 3\(groupDetail)")
+    total += seen; top1 += correct; top3 += near; decided += decisionCorrect
+    print("\(expected): \(correct)/\(seen) Top 1, \(near)/\(seen) Top 3, \(decisionCorrect)/\(seen) Einzelbildentscheidung")
     fflush(stdout)
 }
 
 print("Gesamt: \(top1)/\(total) Top 1, \(top3)/\(total) Top 3; \(unreadable) nicht lesbar")
-if !groups.isEmpty { print("Top 1 oder gleiche Gruppe: \(sameGroup)/\(total)") }
+print("Einzelbildentscheidung ohne Tracking und Region: \(decided)/\(total), davon \(groupOutputs) Sammelnamen")
 if !latencies.isEmpty {
     let ordered = latencies.sorted()
     func percentile(_ p: Double) -> Double { ordered[Int(Double(ordered.count - 1) * p)] }
