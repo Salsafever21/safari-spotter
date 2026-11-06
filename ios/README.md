@@ -31,11 +31,14 @@ die ursprünglichen Metadaten bleiben für eine spätere Prüfung erhalten und w
 Videoaufnahme ihre ersten Metadaten nicht sichern, meldet die App den Schreibfehler und beendet die Aufnahme. Neue Fotos
 werden nur gespeichert, wenn sämtliche Erkennungsmarkierungen kodiert werden können. Beim Import alter Web-Sicherungen
 führen beschädigte Fotomarkierungen oder GPS-Punkte zu einem Fehler und einem vollständigen Rollback, statt unbemerkt
-verloren zu gehen. Für diesen Stand bestanden 55 Logiktests und ein UI-Test mit zwei ausgewählten Fotos im Simulator.
+verloren zu gehen. Ein UI-Test prüft die Auswahl von zwei Fotos im Simulator.
 Falls SwiftData beim App-Start den lokalen Speicher nicht öffnen kann, zeigt die App nun den Fehler und einen erneuten
 Versuch an, statt abzustürzen. Dabei wird der bestehende Datenspeicher nicht ersetzt oder gelöscht.
 Die Zoomsteuerung ändert das Kameraobjektiv nur nach erfolgreichem Sperren der Gerätekonfiguration; Fehler erscheinen
 als Meldung, statt eine ungesperrte Einstellung zu versuchen.
+Bei Game Drives werden auch gebündelte GPS-Updates vollständig in Zeitfolge übernommen. Jeder neue Stapel wird sofort
+atomar zwischengespeichert; ein Schreibfehler erscheint in der Fahrtansicht. Für diesen Stand bestanden 56 Logiktests
+und ein UI-Test im Simulator.
 
 ## Bauen
 

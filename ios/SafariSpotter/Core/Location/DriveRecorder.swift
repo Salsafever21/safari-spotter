@@ -67,9 +67,21 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
 
     private let manager = CLLocationManager()
     private let catalog = SpeciesCatalog.shared
+    private let stateURL: URL
 
     override init() {
+        stateURL = DriveRecorder.defaultStateURL
         super.init()
+        configure()
+    }
+
+    init(stateURL: URL) {
+        self.stateURL = stateURL
+        super.init()
+        configure()
+    }
+
+    private func configure() {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 5
@@ -90,11 +102,18 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let loc = locations.last, loc.horizontalAccuracy >= 0 else { return }
-        lastFix = loc
-        let r = catalog.region(for: loc.coordinate)
-        if r?.key != autoRegion?.key { autoRegion = r }
-        if active { addPoint(loc) }
+        let valid = locations.filter { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }
+            .sorted { $0.timestamp < $1.timestamp }
+        guard let newest = valid.last else { return }
+        if active {
+            let previousTime = points.last?.t
+            for loc in valid { addPoint(loc) }
+            if points.last?.t != previousTime { persist() }
+        }
+        if let lastFix, newest.timestamp < lastFix.timestamp { return }
+        lastFix = newest
+        let region = catalog.region(for: newest.coordinate)
+        if region?.key != autoRegion?.key { autoRegion = region }
     }
 
     /// Region für das Vorwissen (Einstellung "auto" | "none" | key)
@@ -139,6 +158,8 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
 
     private func addPoint(_ loc: CLLocation) {
         let t = loc.timestamp.timeIntervalSince1970
+        guard let startedAt, t >= startedAt.timeIntervalSince1970,
+              points.last.map({ t > $0.t }) ?? true else { return }
         if let last = points.last {
             let d = CLLocation(latitude: last.lat, longitude: last.lon).distance(from: loc)
             if d < 10 && t - last.t < 15 { return }
@@ -147,7 +168,6 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
         points.append(TrackPoint(t: t, lat: (loc.coordinate.latitude * 1e5).rounded() / 1e5, lon: (loc.coordinate.longitude * 1e5).rounded() / 1e5,
                                  spd: loc.speed >= 0 ? (loc.speed * 10).rounded() / 10 : -1, alt: loc.verticalAccuracy >= 0 ? loc.altitude.rounded() : nil))
         if points.count > 20000 { points.removeFirst(points.count - 20000) }
-        if points.count % 5 == 0 { persist() }
     }
 
     func stats(sightings: [Sighting]) -> DriveStats? {
@@ -156,7 +176,10 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     // Laufender Drive übersteht einen App-Neustart (ss.trip)
-    private var stateURL: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("drive-state.json") }
+    private static var defaultStateURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("drive-state.json")
+    }
     private struct State: Codable { var active: Bool; var startedAt: Date?; var points: [TrackPoint]; var dist: Double }
     private func persist() {
         do {

@@ -138,6 +138,10 @@ struct DriveLiveView: View {
                 if let warning = drive.persistenceError { Text(warning).foregroundStyle(.orange) }
             }
             .navigationTitle("Game Drive").navigationBarTitleDisplayMode(.inline)
+            .onAppear { if let warning = drive.persistenceError { saveError = warning } }
+            .onChange(of: drive.persistenceError) { _, warning in
+                if let warning { saveError = warning }
+            }
             .onReceive(timer) { _ in tick += 1 }
             .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
                 Button("OK") {}

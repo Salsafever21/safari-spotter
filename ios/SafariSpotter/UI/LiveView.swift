@@ -63,6 +63,9 @@ struct LiveView: View {
             default: break
             }
         }
+        .onChange(of: drive.persistenceError) { _, warning in
+            if let warning, !showDrive { camera.lastError = warning }
+        }
         .sheet(isPresented: $showSightings) { SightingsView(camera: camera).environmentObject(catalog).environmentObject(drive) }
         .sheet(isPresented: $showSettings) { SettingsView(camera: camera) }
         .sheet(isPresented: $showDrive) { DriveLiveView(sightings: sightings) }
