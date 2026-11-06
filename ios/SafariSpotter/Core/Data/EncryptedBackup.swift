@@ -30,6 +30,21 @@ enum EncryptedBackup {
         return try read(file, count: magic.count) == magic
     }
 
+    /// Checks whether every encrypted chunk is present without needing the password.
+    /// Authentication and content validity are still checked only when decrypting.
+    static func isStructurallyComplete(_ url: URL) throws -> Bool {
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        guard let header = try read(file, count: headerSize), header.prefix(6) == magic else { return false }
+        let rounds = number(header[22..<26], as: UInt32.self)
+        let size = number(header[26..<30], as: UInt32.self)
+        let length = number(header[30..<38], as: UInt64.self)
+        guard (100_000...1_000_000).contains(rounds), size > 0, size <= 2_097_152,
+              length > 0, length <= 20_000_000_000 else { return false }
+        let chunks = (length + UInt64(size) - 1) / UInt64(size)
+        return try fileSize(url) == UInt64(headerSize) + length + 28 * chunks
+    }
+
     static func encrypt(_ source: URL, password: String) throws -> URL {
         guard password.utf8.count >= 12 else { throw BackupError.invalidPassword }
         let size = try fileSize(source)

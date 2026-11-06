@@ -162,12 +162,15 @@ struct SettingsView: View {
     @State private var choosingBackup = false
     @State private var backupMessage: String?
     @State private var nativeBackupURL: URL?
+    @State private var protectedBackups: [URL] = []
+    @State private var backupToDelete: URL?
     @State private var importedArchives: [URL] = []
     @State private var archiveToDelete: URL?
     @State private var creatingProtectedBackup = false
     @State private var unlockingProtectedBackup = false
     @State private var pendingEncryptedURL: URL?
     @State private var backupBusy = false
+    private let backupStore = ProtectedBackupStore()
     private var importBlocked: Bool {
         backupBusy || drive.active || camera.recordingStarting || camera.recording || camera.recordingFinishing
     }
@@ -238,9 +241,26 @@ struct SettingsView: View {
                     }
                     if backupBusy { ProgressView("Sicherung wird verarbeitet …") }
                     if let nativeBackupURL {
-                        ShareLink(item: nativeBackupURL) { Label("Sicherungsdatei teilen", systemImage: "square.and.arrow.up") }
+                        ShareLink(item: nativeBackupURL) { Label("Temporäre Sicherungsdatei teilen", systemImage: "square.and.arrow.up") }
+                    }
+                    if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
+                    ForEach(protectedBackups, id: \.self) { file in
+                        let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(values?.contentModificationDate.map { "Sicherung vom \(fmtDate($0)) · \(fmtTime($0))" } ?? "Lokale Sicherung")
+                                .font(.subheadline.weight(.semibold))
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0), countStyle: .file))
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                ShareLink(item: file) { Label("Teilen", systemImage: "square.and.arrow.up") }
+                                Spacer()
+                                Button("Entfernen", role: .destructive) { backupToDelete = file }
+                            }
+                        }
                     }
                     Text("Enthält Sichtungen, Fotos, Videos, Korrekturen, Game Drives und Einstellungen. Die Datei lässt sich mit dem Passwort später hier wieder importieren.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Fertige Sicherungen bleiben auf diesem iPhone verfügbar. Teile eine Kopie in Dateien ausserhalb der App; beim Löschen der App verschwinden auch diese lokalen Kopien.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Passwort sicher aufbewahren: Ohne Passwort lässt sich diese Sicherung nicht wiederherstellen. Ältere unverschlüsselte Sicherungen bleiben importierbar.")
                         .font(.caption).foregroundStyle(.orange)
@@ -248,7 +268,19 @@ struct SettingsView: View {
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
                 .interactiveDismissDisabled(backupBusy)
-                .onAppear { importedArchives = WebBackupImporter.archivedFiles() }
+                .onAppear {
+                    importedArchives = WebBackupImporter.archivedFiles()
+                    do {
+                        let recovery = backupBusy ? ProtectedBackupStore.RecoveryReport() : try backupStore.recoverTemporary()
+                        protectedBackups = try backupStore.list()
+                        if recovery.incomplete + recovery.failed > 0 {
+                            backupMessage = "\(recovery.incomplete + recovery.failed) frühere temporäre Sicherung(en) konnten nicht übernommen werden."
+                        } else if recovery.recovered > 0 {
+                            backupMessage = "\(recovery.recovered) frühere verschlüsselte Sicherung(en) wiedergefunden."
+                        }
+                    }
+                    catch { backupMessage = "Lokale Sicherungen konnten nicht gelesen werden: \(error.localizedDescription)" }
+                }
                 .sheet(isPresented: $creatingProtectedBackup) {
                     BackupPasswordSheet(mode: .create) { password in createProtectedBackup(password) }
                 }
@@ -265,6 +297,16 @@ struct SettingsView: View {
                         archiveToDelete = nil
                     }
                 } message: { Text("Die importierten Daten bleiben erhalten. Für eine erneute Wiederherstellung dieser Datei muss sie ausserhalb der App vorhanden sein.") }
+                .confirmationDialog("Lokale verschlüsselte Sicherung entfernen?", isPresented: Binding(
+                    get: { backupToDelete != nil }, set: { if !$0 { backupToDelete = nil } })) {
+                    Button("Lokale Sicherung entfernen", role: .destructive) {
+                        if let file = backupToDelete {
+                            do { try backupStore.delete(file); protectedBackups = try backupStore.list() }
+                            catch { backupMessage = error.localizedDescription }
+                        }
+                        backupToDelete = nil
+                    }
+                } message: { Text("Nur diese Kopie auf diesem iPhone wird entfernt. Ausserhalb der App gesicherte Kopien bleiben erhalten.") }
                 .fileImporter(isPresented: $choosingBackup, allowedContentTypes: [.item]) { result in
                     switch result {
                     case .failure(let error): backupMessage = "Datei konnte nicht geöffnet werden: \(error.localizedDescription)"
@@ -293,11 +335,18 @@ struct SettingsView: View {
                     defer { try? FileManager.default.removeItem(at: bundle) }
                     return try EncryptedBackup.encrypt(bundle, password: password)
                 }.value
-                nativeBackupURL = protected
-                if let previous { try? FileManager.default.removeItem(at: previous) }
-                backupMessage = "Verschlüsselte Sicherung bereit. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
+                do {
+                    let stored = try backupStore.save(protected)
+                    protectedBackups = (try? backupStore.list()) ?? [stored] + protectedBackups
+                    nativeBackupURL = nil
+                    if let previous { try? FileManager.default.removeItem(at: previous) }
+                    backupMessage = "Verschlüsselte Sicherung auf diesem iPhone gespeichert. Über „Teilen“ eine Kopie ausserhalb der App ablegen."
+                } catch {
+                    nativeBackupURL = protected
+                    backupMessage = "Lokale Ablage fehlgeschlagen: \(error.localizedDescription). Die temporäre Datei jetzt teilen."
+                }
             } catch {
-                backupMessage = error.localizedDescription + (previous == nil ? "" : " Die bisherige Sicherungsdatei bleibt verfügbar.")
+                backupMessage = error.localizedDescription + (protectedBackups.isEmpty && previous == nil ? "" : " Bisherige Sicherungen bleiben verfügbar.")
             }
             backupBusy = false
         }

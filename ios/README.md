@@ -42,7 +42,7 @@ Der GPS-Schalter aus der Web-App ist in den iOS-Einstellungen verfügbar. Ist er
 verwirft den letzten Fix und ergänzt neue Kamera-Sichtungen, Schnappschüsse und Videos nicht mit aktuellem GPS. Ein Game
 Drive schaltet GPS beim Start ein; während einer aktiven Fahrt kann es erst nach dem Beenden ausgeschaltet werden.
 Standortdaten, die bereits im importierten Foto stehen, bleiben unabhängig davon erhalten. Der Import einer Sicherung
-wartet auf das Ende eines Game Drives oder einer Videoaufnahme. Für diesen Stand bestanden 57 Logiktests und ein UI-Test.
+wartet auf das Ende eines Game Drives oder einer Videoaufnahme. Für diesen Stand bestanden 58 Logiktests und ein UI-Test.
 „Namen einblenden“ steuert nun auch die Live-Kamera: Rahmen bleiben sichtbar, Namen und Hinweise werden ausgeblendet.
 Der Bildbetrachter verwendet bei älteren Fotos ohne gespeicherte Abmessungen die Bilddatei als Grössenquelle und zeigt
 einen Hinweis, falls ein Foto nicht dekodiert werden kann.
@@ -86,7 +86,11 @@ Speicher haben.
 In der iOS-App unter **Einstellungen → Bisherige Web-App-Daten → Sicherungsdatei importieren** die Datei auswählen. Der
 Import prüft Format, Zählwerte und SHA-256 der Fotos, speichert die Originaldatei im App-Speicher und legt bei erneutem
 Import keine Duplikate an. Für spätere Sicherungen unter **Einstellungen → Daten sichern** ein Passwort mit mindestens
-12 Zeichen vergeben, danach über **Sicherungsdatei teilen** ausserhalb der App sichern. Die iOS-App verschlüsselt die
+12 Zeichen vergeben, danach über **Teilen** eine Kopie ausserhalb der App sichern. Fertige verschlüsselte Sicherungen
+bleiben im geschützten App-Speicher auch nach einem Neustart verfügbar und können einzeln geteilt oder entfernt werden.
+Beim Öffnen der Einstellungen übernimmt die App auch vollständig geschriebene temporäre Sicherungen aus früheren Builds;
+unvollständige Dateien werden erkannt und nicht als fertige Sicherung angeboten.
+Beim Löschen der App verschwinden diese lokalen Kopien; die externe Kopie bleibt deshalb wichtig. Die iOS-App verschlüsselt die
 gesamte Datei, einschliesslich aller Clip-Dateien, mit einem zufälligen Salt, PBKDF2-HMAC-SHA256 und AES-256-GCM in Blöcken.
 Die Sicherung lässt sich erst starten, wenn eine laufende Videoaufnahme vollständig gespeichert ist. Zum Wiederherstellen dieselbe Datei
 importieren und das Passwort eingeben. Ohne Passwort ist eine Wiederherstellung nicht möglich; die App speichert es nicht.
@@ -115,6 +119,7 @@ ios/
     Core/Detection/Tracker.swift     IoU-Tracker mit Glättung, Bestätigung schwacher Kandidaten, Art-EMA 0.6/0.4
     Core/Detection/CameraController  AVFoundation bis 4K, Rechte und Lebenszyklus, Erkennungsschleife, Sichtungen, Schnappschüsse
     Core/Data/Models.swift           SwiftData: Sighting, PhotoItem, Correction, Drive; Position mit coarsen()
+    Core/Data/ProtectedBackupStore   Lokale, dauerhaft verfügbare verschlüsselte Sicherungsdateien
     Core/Data/SightingStore.swift    Umbenennen, Entfernen, Live-Korrektur (nie doppelt, Abspalten bei n > 1), Fotoschutz
     Core/Privacy/LocationProtection  Artenschutz-Regeln als reine Funktionen (Position, sensible Arten, Korrekturplan)
     Core/Detection/DetectionGate     Trennt Bildlieferung (Aufnahme) und Erkennung, staut nie Bilder an
