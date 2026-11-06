@@ -109,7 +109,8 @@ func runVideoChecks() async {
     let changed = await ClipFiles.recoverInterrupted(in: dir, excluding: d) { url in
         url.lastPathComponent.hasPrefix(b.uuidString) ? ClipProbe(duration: 3.0, width: 1080, height: 1920) : nil
     }
-    expect(Set(changed.map(\.id)) == [b, c], "nur abgebrochene Clips geprüft, laufender ausgenommen")
+    expect(Set(changed.changed.map(\.id)) == [b, c], "nur abgebrochene Clips geprüft, laufender ausgenommen")
+    expect(changed.failedIDs.isEmpty, "Wiederherstellung ohne Schreibfehler")
     expect(ClipFiles.load(b, in: dir)?.state == .recovered && ClipFiles.load(b, in: dir)?.duration == 3.0, "lesbarer Abbruch → wiederhergestellt")
     expect(ClipFiles.load(c, in: dir)?.state == .damaged && FileManager.default.fileExists(atPath: ClipFiles.movieURL(c, in: dir).path), "unlesbar → beschädigt, Datei bleibt")
     expect(ClipFiles.load(d, in: dir)?.state == .recording, "laufende Aufnahme unverändert")
