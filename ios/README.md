@@ -54,10 +54,10 @@ Das gilt auch für andere Tierfotos innerhalb von 15 Minuten um geschützte Sich
 Sammelexporten wird der Schutzkontext aus dem gesamten Datenspeicher gelesen, auch im Foto-Viewer einer einzelnen Fahrt.
 Bei einem Lesefehler wird der Export mit einer Meldung abgebrochen. Die gespeicherten Originalfotos werden nicht verändert.
 Verifiziert am 6. November 2026 mit Xcode 27.2: 114 Tests im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
-mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
+mit der Web-Logik bestanden; das signierte iOS-Release-Archiv baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
-Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 8 wurde um 18:41 Uhr MEZ erfolgreich
+Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 9 wurde um 19:02 Uhr MEZ erfolgreich
 zu App Store Connect hochgeladen; Apple meldet die Verarbeitung des Pakets. Die Zuweisung zur internen TestFlight-Gruppe
 ist noch nicht bestätigt. Build 8 enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen.
 Build 9 ergänzt sichtbare Fehler beim Lesen des Videoordners: Die zuletzt geladene Clipliste bleibt erhalten,
