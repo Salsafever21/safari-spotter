@@ -121,16 +121,16 @@ struct DriveLiveView: View {
                 }
                 Section {
                     Button("Game Drive beenden", role: .destructive) {
-                        guard let d = drive.preparedDrive(sightingsCount: sightings.filter {
-                            $0.t >= (drive.startedAt ?? .now)
-                        }.reduce(0) { $0 + $1.n }) else { return }
-                        context.insert(d)
                         do {
+                            guard let d = try drive.preparedDrive(sightingsCount: sightings.filter {
+                                $0.t >= (drive.startedAt ?? .now)
+                            }.reduce(0) { $0 + $1.n }) else { return }
+                            context.insert(d)
                             try context.save()
                             drive.finishDrive()
                             dismiss()
                         } catch {
-                            context.delete(d)
+                            context.rollback()
                             saveError = "Game Drive konnte nicht gespeichert werden: \(error.localizedDescription). Die Aufzeichnung läuft weiter."
                         }
                     }

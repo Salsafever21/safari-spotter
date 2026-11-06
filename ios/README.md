@@ -20,7 +20,10 @@ Die Fotomarkierungen werden vor dem Wechsel auf den Hauptthread kopiert, statt d
 Manuelle Korrekturen brechen ab, wenn die verknüpften Fotos nicht gelesen oder die Änderungen nicht gespeichert werden
 können; das verhindert insbesondere eine ungeschützte Nashorn-Position nach einer halben Korrektur. Listen, Galerie und
 Prüfliste zeigen Speicherfehler an, statt sie zu verbergen. Ein Game Drive wird erst nach erfolgreichem Speichern beendet;
-die laufende Route wird atomar zwischengespeichert. Für diesen Stand bestanden 47 Simulator-Tests.
+die laufende Route wird atomar zwischengespeichert. Beim Hintergrundwechsel werden die letzten GPS-Punkte gesichert.
+Ein abgeschlossener Drive wird beim Neustart mit der SwiftData-Datenbank abgeglichen, falls die letzte JSON-Datei veraltet ist.
+Fahrtspuren und Foto-Markierungen werden bei der Sicherung streng geprüft; beschädigte Daten lassen die Sicherung mit
+einem Fehler abbrechen, statt unbemerkt zu fehlen. Für diesen Stand bestanden 51 Simulator-Tests.
 
 ## Bauen
 
@@ -247,7 +250,8 @@ Application Support/Clips/
 - **Gerätetest**: Der Tracking-Fix aus Build 4 und der Sicherungsweg aus Build 6 wurden auf dem iPhone bestätigt. Die
   Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
-  mit echten Tieraufnahmen vermessen. Abweichung zur Web-App
+  mit echten Tieraufnahmen vermessen. Die Trainingsbilder für das vorbereitete YOLO-Modell liegen derzeit nicht im Repository.
+  Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
 - **Mikrofonton auf dem Gerät**: Die AAC-Tonspur ist mit synthetischen Samples im Simulator geprüft, die echte

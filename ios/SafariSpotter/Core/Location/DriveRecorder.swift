@@ -114,9 +114,17 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     /// Erst einen Datensatz vorbereiten; die laufende Route bleibt erhalten, bis SwiftData ihn bestätigt hat.
-    func preparedDrive(sightingsCount: Int) -> Drive? {
+    func preparedDrive(sightingsCount: Int) throws -> Drive? {
         guard active, let s = startedAt else { return nil }
-        return Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+        return try Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+    }
+
+    /// Ein erfolgreich gespeicherter Drive gewinnt gegen eine veraltete aktive JSON-Datei.
+    /// Das kann nach einem Fehler beim letzten atomaren Schreiben auftreten.
+    func reconcileCompletedDrive(startedAt completedStart: Date) {
+        guard active, let start = startedAt,
+              abs(start.timeIntervalSince(completedStart)) < 0.001 else { return }
+        finishDrive()
     }
 
     func finishDrive() {
@@ -125,6 +133,9 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
         manager.allowsBackgroundLocationUpdates = false
         persist()
     }
+
+    /// Sichert auch die letzten GPS-Punkte, bevor iOS die App im Hintergrund anhält.
+    func checkpoint() { if active { persist() } }
 
     private func addPoint(_ loc: CLLocation) {
         let t = loc.timestamp.timeIntervalSince1970
@@ -158,9 +169,16 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
         }
     }
     private func restore() {
-        guard let data = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode(State.self, from: data), s.active else { return }
-        active = true; startedAt = s.startedAt; points = s.points; dist = s.dist
-        manager.allowsBackgroundLocationUpdates = true
-        start()
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
+        do {
+            let s = try JSONDecoder().decode(State.self, from: Data(contentsOf: stateURL))
+            guard s.active else { return }
+            guard let startDate = s.startedAt else { throw CocoaError(.fileReadCorruptFile) }
+            active = true; startedAt = startDate; points = s.points; dist = s.dist
+            manager.allowsBackgroundLocationUpdates = true
+            start()
+        } catch {
+            persistenceError = "Letzter Game Drive konnte nicht wiederhergestellt werden: \(error.localizedDescription)"
+        }
     }
 }

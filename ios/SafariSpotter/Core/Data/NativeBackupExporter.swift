@@ -28,10 +28,10 @@ enum NativeBackupExporter {
                         sensitive: sensitive(s.name))
             return record
         }
-        let driveRecords: [[String: Any]] = drives.map { d in
+        let driveRecords: [[String: Any]] = try drives.map { d in
             ["id": d.id.uuidString, "startedAt": milliseconds(d.startedAt), "endedAt": milliseconds(d.endedAt),
              "dist": d.dist, "sightings": d.sightings,
-             "points": d.points.map(pointRecord)]
+             "points": try d.decodedPoints().map(pointRecord)]
         }
         let correctionRecords: [[String: Any]] = corrections.map { c in
             var record: [String: Any] = ["id": c.id.uuidString, "t": milliseconds(c.t),
@@ -44,10 +44,11 @@ enum NativeBackupExporter {
         var photoRecords: [[String: Any]] = []
         var binaryLength = 0
         for p in photos {
+            let detections = try p.decodedDets()
             var metadata: [String: Any] = ["id": p.id.uuidString, "t": milliseconds(p.t), "kind": p.kind,
                                            "species": p.species, "w": p.width, "h": p.height,
                                            "sightIds": p.sightingIds.map(\.uuidString), "coarse": p.coarse,
-                                           "dets": p.dets.map { d -> [String: Any] in
+                                           "dets": detections.map { d -> [String: Any] in
                 var item: [String: Any] = ["box": [d.x, d.y, d.w, d.h],
                                            "conf": d.conf, "sure": d.sure]
                 item["name"] = d.name
@@ -55,7 +56,7 @@ enum NativeBackupExporter {
             }]
             if let thumb = p.thumb { metadata["thumb"] = dataURL(thumb) }
             let photoSensitive = p.species.contains(where: sensitive)
-                || p.dets.contains { $0.name.map(sensitive) ?? false }
+                || detections.contains { $0.name.map(sensitive) ?? false }
                 || p.sightingIds.contains { names[$0].map(sensitive) ?? false }
             putPosition(&metadata, lat: p.lat, lon: p.lon, acc: nil, coarse: p.coarse,
                         sensitive: photoSensitive)

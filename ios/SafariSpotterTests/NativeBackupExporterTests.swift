@@ -4,6 +4,22 @@ import SwiftData
 
 @MainActor
 final class NativeBackupExporterTests: StoreTestCase {
+    func testCorruptDrivePointsCannotProduceIncompleteBackup() throws {
+        let drive = try Drive(startedAt: .now.addingTimeInterval(-60), endedAt: .now,
+                              dist: 500, points: [], sightings: 0)
+        drive.pointsJSON = Data("invalid".utf8)
+        context.insert(drive)
+        try context.save()
+        XCTAssertThrowsError(try NativeBackupExporter.create(context: context))
+    }
+
+    func testCorruptPhotoDetectionsCannotProduceIncompleteBackup() throws {
+        let photo = addPhoto(species: ["Elefant"], sightingIds: [])
+        photo.detsJSON = Data("invalid".utf8)
+        try context.save()
+        XCTAssertThrowsError(try NativeBackupExporter.create(context: context))
+    }
+
     func testCameraSettingsSurviveNativeBackup() throws {
         let settings = AppSettings.shared
         let originalLens = settings.lensID, originalBurnIn = settings.burnIn
@@ -33,7 +49,7 @@ final class NativeBackupExporterTests: StoreTestCase {
                                     conf: 0.7, label: "Breitmaulnashorn", labelKey: nil,
                                     status: "corrected", region: nil)
         context.insert(correction)
-        let drive = Drive(startedAt: .now.addingTimeInterval(-60), endedAt: .now,
+        let drive = try Drive(startedAt: .now.addingTimeInterval(-60), endedAt: .now,
                           dist: 500, points: [], sightings: 1)
         context.insert(drive)
         try context.save()

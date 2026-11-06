@@ -38,7 +38,9 @@ struct LiveView: View {
             .padding(.horizontal, 14)
         }
         .onAppear {
+            reconcileSavedDrive()
             camera.attach(context: context); camera.start(); drive.start()
+            if let warning = drive.persistenceError { camera.lastError = warning }
             if settings.autoTrack { camera.setTracking(true) }
             UIApplication.shared.isIdleTimerDisabled = true
         }
@@ -54,7 +56,7 @@ struct LiveView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active: camera.start()
-            case .background: camera.stop()
+            case .background: drive.checkpoint(); camera.stop()
             default: break
             }
         }
@@ -65,6 +67,18 @@ struct LiveView: View {
         .sheet(isPresented: $photoAnalysis) { PhotoAnalysisView(camera: camera) }
         .sheet(item: $capturedPhoto) { item in PhotoAnalysisView(camera: camera, initialPhoto: item) }
         .alert("Fehler", isPresented: Binding(get: { camera.lastError != nil }, set: { _ in camera.lastError = nil })) { Button("OK") {} } message: { Text(camera.lastError ?? "") }
+    }
+
+    private func reconcileSavedDrive() {
+        guard let start = drive.startedAt, drive.active else { return }
+        do {
+            let saved = try context.fetch(FetchDescriptor<Drive>())
+            if let completed = saved.first(where: { abs($0.startedAt.timeIntervalSince(start)) < 0.001 }) {
+                drive.reconcileCompletedDrive(startedAt: completed.startedAt)
+            }
+        } catch {
+            camera.lastError = "Abgeschlossene Game Drives konnten nicht geprüft werden: \(error.localizedDescription)"
+        }
     }
 
     private var topBar: some View {

@@ -181,7 +181,7 @@ enum WebBackupImporter {
                           let lon = number(p[2]), let speed = number(p[3]) else { return nil }
                     return TrackPoint(t: t / 1000, lat: lat, lon: lon, spd: speed, alt: p.count > 4 ? number(p[4]) : nil)
                 }
-                let item = Drive(startedAt: Date(timeIntervalSince1970: start / 1000),
+                let item = try Drive(startedAt: Date(timeIntervalSince1970: start / 1000),
                                  endedAt: Date(timeIntervalSince1970: end / 1000),
                                  dist: number(record["dist"]) ?? 0, points: points,
                                  sightings: int(record["sightings"]) ?? 0)

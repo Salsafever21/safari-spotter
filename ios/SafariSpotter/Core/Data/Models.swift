@@ -48,7 +48,11 @@ final class PhotoItem {
         self.image = image; self.thumb = thumb; self.width = width; self.height = height
         lat = position?.lat; lon = position?.lon; coarse = position?.coarse ?? false; self.sightingIds = sightingIds
     }
-    var dets: [PhotoDet] { detsJSON.flatMap { try? JSONDecoder().decode([PhotoDet].self, from: $0) } ?? [] }
+    var dets: [PhotoDet] { (try? decodedDets()) ?? [] }
+    func decodedDets() throws -> [PhotoDet] {
+        guard let detsJSON else { return [] }
+        return try JSONDecoder().decode([PhotoDet].self, from: detsJSON)
+    }
     var coordinate: CLLocationCoordinate2D? { guard let lat, let lon else { return nil }; return .init(latitude: lat, longitude: lon) }
 }
 
@@ -84,11 +88,12 @@ final class Drive {
     var pointsJSON: Data     // [[t, lat, lon, speed, alt]]
     var sightings: Int
 
-    init(startedAt: Date, endedAt: Date, dist: Double, points: [TrackPoint], sightings: Int) {
+    init(startedAt: Date, endedAt: Date, dist: Double, points: [TrackPoint], sightings: Int) throws {
         id = UUID(); self.startedAt = startedAt; self.endedAt = endedAt; self.dist = dist
-        pointsJSON = (try? JSONEncoder().encode(points)) ?? Data(); self.sightings = sightings
+        pointsJSON = try JSONEncoder().encode(points); self.sightings = sightings
     }
-    var points: [TrackPoint] { (try? JSONDecoder().decode([TrackPoint].self, from: pointsJSON)) ?? [] }
+    var points: [TrackPoint] { (try? decodedPoints()) ?? [] }
+    func decodedPoints() throws -> [TrackPoint] { try JSONDecoder().decode([TrackPoint].self, from: pointsJSON) }
 }
 
 /// Position einer Sichtung, bei Nashörnern bereits vergröbert
