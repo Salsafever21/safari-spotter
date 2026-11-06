@@ -23,8 +23,9 @@ targets:
       - path: SafariSpotter
       # Core-ML-Modelle einzeln als Dateireferenz (ein .mlpackage ist ein Ordner und darf nicht aufgeklappt werden);
       # Xcode kompiliert sie in der Sources-Phase und erzeugt die Swift-Klassen SafariSpotterDetector / SafariSpotterSpecies.
-      # Eigener YOLO-Detektor (training/yolo/README.md): erst wenn die Datei existiert, hier eine weitere Zeile
-      #   - { path: Models/SafariSpotterYolo.mlpackage, type: file, buildPhase: sources }
+      # Optionaler geprüfter Ein-Modell-Detektor (YOLO oder Apple Create ML): erst wenn die Datei existiert,
+      # hier die passende Zeile für SafariSpotterYolo.mlpackage oder SafariSpotterYolo.mlmodel eintragen, z. B.
+      #   - { path: Models/SafariSpotterYolo.mlmodel, type: file, buildPhase: sources }
       # eintragen; eine Referenz auf eine fehlende Datei würde den Build abbrechen.
       - path: Models/SafariSpotterDetector.mlmodel
         type: file

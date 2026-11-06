@@ -11,6 +11,10 @@ bereit ([offizielle Lizenzangaben](https://github.com/ultralytics/ultralytics/bl
 trainiertes Modell wird nicht ohne geklärte Lizenz in Safari Spotter oder TestFlight übernommen. Der aktuelle Detektor
 und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
 
+**Apple-Alternative:** Create ML kann aus denselben geprüften Boxen einen Core-ML-Objektdetektor ohne YOLO11-Gewichte
+trainieren ([Apple-Dokumentation](https://developer.apple.com/documentation/createml/mlobjectdetector)). Der Datensatz
+wird dafür in Apples JSON-Format exportiert. Leistung und Erkennungsqualität dieses Wegs sind noch nicht gemessen.
+
 ## Ablauf
 
 1. **Fotos holen** (falls `training/data/` fehlt), wie fürs Artenmodell. Der Downloader nimmt nur CC0-/CC-BY-Fotos,
@@ -82,6 +86,23 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    wenn es im Bundle liegt, und schaltet automatisch um: Rahmen und Art kommen dann aus dem Detektor
    (`Detection.species`, `Tracker.applyDetectorSpecies`), der Artenkopf bleibt als zweite Meinung für schwache Treffer,
    die Fernerkennung (Kacheln) funktioniert unverändert. Ohne die Datei baut und läuft die App wie bisher.
+
+## Create ML als Alternative
+
+Erst nach vollständigem Audit und der Sichtprüfung aller Rückfall- und Mehrfach-Boxen:
+
+```
+cd training
+./node22.sh yolo/export_create_ml.js
+swift yolo/train_create_ml.swift yolo/dataset/create_ml yolo/dataset/SafariSpotterCandidate.mlmodel
+```
+
+Der Export übernimmt die bereits nach Beobachtung getrennten Train-/Val-Bilder. Apples JSON bekommt normierte
+Mittelpunkt-Koordinaten; negative Beispiele haben leere Annotationen. Der Export läuft nur nach bestandenem vollständigem
+Audit und erzeugt keinen Datensatz, solange Prüffälle offen sind. `train_create_ml.swift` verwendet den festen
+Validierungssplit und schreibt ein neues `.mlmodel`, ohne ein bestehendes Modell zu überschreiben. Nach unabhängigem
+Qualitätstest kann es als `ios/Models/SafariSpotterYolo.mlmodel` in `ios/project.yml` referenziert werden;
+`VisionPipeline` verwendet es dann als optionalen Ein-Modell-Detektor. Training und Gerätetest sind noch ausstehend.
 
 ## Was zu erwarten ist
 
