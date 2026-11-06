@@ -10,11 +10,18 @@ import CryptoKit
 enum Exporters {
     static func hourFloor(_ d: Date) -> Date { Date(timeIntervalSince1970: floor(d.timeIntervalSince1970 / 3600) * 3600) }
 
-    static func csv(sightings: [Sighting], catalog: SpeciesCatalog) -> String {
+    private static func protectedTimes(sightings: [Sighting], photos: [PhotoItem], catalog: SpeciesCatalog) -> [TimeInterval] {
+        sightings.filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
+        + photos.filter { PhotoExporter.requiresProtection(for: $0, isSensitive: catalog.isSensitive) }.map { $0.t.timeIntervalSince1970 }
+    }
+
+    static func csv(sightings: [Sighting], catalog: SpeciesCatalog,
+                    privacySightings: [Sighting]? = nil, privacyPhotos: [PhotoItem] = []) -> String {
         let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"; let tf = DateFormatter(); tf.dateFormat = "HH:mm"
+        let protected = protectedTimes(sightings: privacySightings ?? sightings, photos: privacyPhotos, catalog: catalog)
         var rows = ["Datum;Zeit;Art;Anzahl;Breite;Laenge;Genauigkeit"]
         for s in sightings {
-            let sens = s.coarse || catalog.isSensitive(name: s.name)
+            let sens = s.coarse || catalog.isSensitive(name: s.name) || protected.contains { abs(s.t.timeIntervalSince1970 - $0) <= 15 * 60 }
             let position = LocationProtection.protectedPosition(lat: s.lat, lon: s.lon, coarse: s.coarse, sensitive: sens)
             let t = sens ? hourFloor(s.t) : s.t
             let prec = position == nil ? "" : sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m"
@@ -25,14 +32,14 @@ enum Exporters {
     }
 
     static func gpx(points: [TrackPoint], sightings: [Sighting], catalog: SpeciesCatalog, version: String,
-                    privacySightings: [Sighting]? = nil) -> String {
+                    privacySightings: [Sighting]? = nil, privacyPhotos: [PhotoItem] = []) -> String {
         let iso = ISO8601DateFormatter()
-        let sensTimes = (privacySightings ?? sightings).filter { $0.coarse || catalog.isSensitive(name: $0.name) }.map { $0.t.timeIntervalSince1970 }
-        func hidden(_ t: TimeInterval) -> Bool { sensTimes.contains { abs(t - $0) < 15 * 60 } }
+        let sensTimes = protectedTimes(sightings: privacySightings ?? sightings, photos: privacyPhotos, catalog: catalog)
+        func hidden(_ t: TimeInterval) -> Bool { sensTimes.contains { abs(t - $0) <= 15 * 60 } }
         func esc(_ s: String) -> String { s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;") }
         var g = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"Safari Spotter iOS \(version)\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n"
         for s in sightings {
-            let sens = s.coarse || catalog.isSensitive(name: s.name)
+            let sens = s.coarse || catalog.isSensitive(name: s.name) || hidden(s.t.timeIntervalSince1970)
             guard let position = LocationProtection.protectedPosition(lat: s.lat, lon: s.lon, coarse: s.coarse, sensitive: sens) else { continue }
             let t = sens ? hourFloor(s.t) : s.t
             g += "  <wpt lat=\"\(String(format: sens ? "%.3f" : "%.5f", position.lat))\" lon=\"\(String(format: sens ? "%.3f" : "%.5f", position.lon))\"><time>\(iso.string(from: t))</time><name>\(esc(s.name))\(s.n > 1 ? " (\(s.n))" : "")</name><desc>\(sens ? "±10 km (Artenschutz)" : "±\(Int(s.acc ?? 0)) m")</desc></wpt>\n"
@@ -131,6 +138,15 @@ enum CorrectionExporter {
 /// Artenschutz: Die Position, mit der ein Foto die App verlässt, kommt immer aus `exportCoordinate` (zweite Absicherung,
 /// greift auch bei Fotos, die vor dieser Regel oder per Import gespeichert wurden).
 enum PhotoExporter {
+    static func requiresProtection(for photo: PhotoItem, isSensitive: (String) -> Bool) -> Bool {
+        photo.coarse || LocationProtection.containsSensitive(photo.species.map { $0 as String? } + photo.dets.map(\.name),
+                                                            isSensitive: isSensitive)
+    }
+
+    static func exportDate(for photo: PhotoItem, isSensitive: (String) -> Bool) -> Date {
+        requiresProtection(for: photo, isSensitive: isSensitive) ? Exporters.hourFloor(photo.t) : photo.t
+    }
+
     enum ExportError: LocalizedError {
         case denied, metadata
         var errorDescription: String? {
@@ -152,7 +168,8 @@ enum PhotoExporter {
     /// JPEG mit Datum, Beschreibung und genau der übergebenen Position. Ein GPS-Eintrag der Quelle wird nie übernommen:
     /// ohne Position wird er entfernt, mit Position ersetzt. Lässt sich das nicht nachweisen, wird das Bild ohne
     /// Quell-Metadaten neu kodiert; scheitert auch das, kommt bei vorhandenem Quell-GPS ein leeres Ergebnis zurück.
-    static func jpegWithMetadata(_ jpeg: Data, date: Date, coordinate: CLLocationCoordinate2D?, description: String) -> Data {
+    static func jpegWithMetadata(_ jpeg: Data, date: Date, coordinate: CLLocationCoordinate2D?, description: String,
+                                 stripSourceMetadata: Bool = false) -> Data {
         let df = DateFormatter(); df.dateFormat = "yyyy:MM:dd HH:mm:ss"
         let props: [CFString: Any] = [
             kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFImageDescription: description, kCGImagePropertyTIFFSoftware: "Safari Spotter", kCGImagePropertyTIFFDateTime: df.string(from: date)],
@@ -162,9 +179,9 @@ enum PhotoExporter {
             [kCGImagePropertyGPSLatitude: abs(c.latitude), kCGImagePropertyGPSLatitudeRef: c.latitude < 0 ? "S" : "N",
              kCGImagePropertyGPSLongitude: abs(c.longitude), kCGImagePropertyGPSLongitudeRef: c.longitude < 0 ? "W" : "E"]
         }
-        if let out = rewrite(jpeg, props: props, gps: gps, keepSource: true), gpsMatches(out, coordinate) { return out }
+        if !stripSourceMetadata, let out = rewrite(jpeg, props: props, gps: gps, keepSource: true), gpsMatches(out, coordinate) { return out }
         if let out = rewrite(jpeg, props: props, gps: gps, keepSource: false), gpsMatches(out, coordinate) { return out }
-        return gpsCoordinate(of: jpeg) == nil ? jpeg : Data()
+        return !stripSourceMetadata && gpsCoordinate(of: jpeg) == nil ? jpeg : Data()
     }
 
     /// GPS-Position aus den Bildinformationen eines JPEG (nil ohne GPS)
@@ -217,10 +234,11 @@ enum PhotoExporter {
     /// Foto mit geschützter Position, Datum und Artnamen in die Mediathek sichern
     static func export(_ photo: PhotoItem, isSensitive: (String) -> Bool) async throws {
         let coordinate = exportCoordinate(for: photo, isSensitive: isSensitive)
-        let jpeg = jpegWithMetadata(photo.image, date: photo.t, coordinate: coordinate, description: "Safari Spotter: " + photo.species.joined(separator: ", "))
+        let date = exportDate(for: photo, isSensitive: isSensitive)
+        let jpeg = jpegWithMetadata(photo.image, date: date, coordinate: coordinate, description: "Safari Spotter: " + photo.species.joined(separator: ", "),
+                                    stripSourceMetadata: requiresProtection(for: photo, isSensitive: isSensitive))
         guard !jpeg.isEmpty else { throw ExportError.metadata }
         guard await requestAddAccess() else { throw ExportError.denied }
-        let date = photo.t
         try await PHPhotoLibrary.shared().performChanges {
             let req = PHAssetCreationRequest.forAsset()
             req.addResource(with: .photo, data: jpeg, options: nil)

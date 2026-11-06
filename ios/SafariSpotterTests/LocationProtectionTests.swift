@@ -1,5 +1,7 @@
 import XCTest
 import CoreLocation
+import ImageIO
+import UniformTypeIdentifiers
 @testable import SafariSpotter
 
 /// Nashorn-Standorte: Umbenennen schützt Sichtung und verknüpfte Fotos, der Export schreibt nie eine genaue Nashorn-Position
@@ -72,5 +74,38 @@ final class LocationProtectionTests: StoreTestCase {
         let got = try XCTUnwrap(PhotoExporter.gpsCoordinate(of: out))
         XCTAssertEqual(got.latitude, c.lat, accuracy: 1e-4)
         XCTAssertEqual(got.longitude, c.lon, accuracy: 1e-4)
+    }
+
+    func testProtectedPhotoExportRemovesOriginalTimeMetadata() throws {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(Self.jpeg() as CFData, nil))
+        let raw = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(raw as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImageFromSource(destination, source, 0, [
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2026:11:06 10:23:45", kCGImagePropertyExifSubsecTimeOriginal: "123"],
+            kCGImagePropertyIPTCDictionary: [kCGImagePropertyIPTCDateCreated: "20261106", kCGImagePropertyIPTCTimeCreated: "102345+0000"]
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let date = Date(timeIntervalSince1970: 1_700_000_123)
+        let rounded = Exporters.hourFloor(date)
+        let output = PhotoExporter.jpegWithMetadata(raw as Data, date: rounded, coordinate: nil,
+                                                     description: "Nashorn", stripSourceMetadata: true)
+        let result = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(result, 0, nil) as? [CFString: Any])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary] as? [CFString: Any])
+        let formatter = DateFormatter(); formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal] as? String, formatter.string(from: rounded))
+        XCTAssertNil(exif[kCGImagePropertyExifSubsecTimeOriginal])
+        // ImageIO kann aus den neuen, gerundeten EXIF-Daten wieder IPTC-Felder erzeugen.
+        // Entscheidend ist, dass sie keine ursprüngliche genaue Zeit mehr enthalten.
+        if let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+            formatter.dateFormat = "yyyyMMdd"
+            if let date = iptc[kCGImagePropertyIPTCDateCreated] as? String {
+                XCTAssertEqual(date, formatter.string(from: rounded))
+            }
+            formatter.dateFormat = "HHmmss"
+            for key in [kCGImagePropertyIPTCTimeCreated, kCGImagePropertyIPTCDigitalCreationTime] {
+                if let time = iptc[key] as? String { XCTAssertEqual(String(time.prefix(6)), formatter.string(from: rounded)) }
+            }
+        }
     }
 }

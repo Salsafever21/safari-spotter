@@ -111,7 +111,7 @@ struct SightingsView: View {
             }
             Section("Pro Art") { ForEach(counts, id: \.0) { c in HStack { Text(c.0); Spacer(); Text("\(c.1)").monospacedDigit().bold() } } }
             Section {
-                if let url = Exporters.tempFile(Exporters.csv(sightings: sightings.reversed(), catalog: catalog), name: "sichtungen.csv") { ShareLink(item: url) { Label("CSV exportieren", systemImage: "tablecells") } }
+                if let url = Exporters.tempFile(Exporters.csv(sightings: sightings.reversed(), catalog: catalog, privacyPhotos: photos), name: "sichtungen.csv") { ShareLink(item: url) { Label("CSV exportieren", systemImage: "tablecells") } }
             }
         }
     }
@@ -158,7 +158,7 @@ struct GalleryView: View {
                 }.disabled(busy || photos.isEmpty)
                 Button("Alle löschen", role: .destructive) { confirmDelete = true }
             }.buttonStyle(.bordered).padding()
-            Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. In der Fotos-App erscheinen sie auf der Orte-Karte. Nashorn-Fotos tragen nur den 10-km-Standort.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+            Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. In der Fotos-App erscheinen sie auf der Orte-Karte. Nashorn-Fotos erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
         .confirmationDialog("Alle Fotos aus der App löschen?", isPresented: $confirmDelete) {

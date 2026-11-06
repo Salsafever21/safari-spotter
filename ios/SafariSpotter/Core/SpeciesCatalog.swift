@@ -144,7 +144,8 @@ final class SpeciesCatalog: ObservableObject {
             else if probability > topAnimal { topAnimal = probability; topAnimalIndex = index }
         }
         // Länder dürfen einen unsicheren Treffer oder ein Haustier nie zu einer sicheren Safari-Sichtung machen.
-        let allowCountry = topAnimal >= 0.5 && topAnimal > topNonSafari
+        let groupedDecision = SpeciesDecision.decide(probs, catalog: self).key?.hasPrefix("group:") == true
+        let allowCountry = topAnimal >= 0.5 && topAnimal > topNonSafari && !groupedDecision
         var countryFactor = 1.0
         if allowCountry, let index = topAnimalIndex {
             let key = classes[index].key

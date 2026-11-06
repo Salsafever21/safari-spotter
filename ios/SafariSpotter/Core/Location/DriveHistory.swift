@@ -30,16 +30,17 @@ struct DriveWindow {
 enum DriveHistoryExport {
     private static let prefix = "safari-spotter-fahrt-"
 
-    static func gpx(drive: Drive, sightings: [Sighting], catalog: SpeciesCatalog) throws -> String {
+    static func gpx(drive: Drive, sightings: [Sighting], photos: [PhotoItem] = [], catalog: SpeciesCatalog) throws -> String {
         let window = try DriveWindow(start: drive.startedAt, end: drive.endedAt)
         let points = window.points(from: try drive.decodedPoints())
         return Exporters.gpx(points: points, sightings: window.sightings(from: sightings).sorted { $0.t < $1.t },
-                             catalog: catalog, version: "1.0", privacySightings: sightings)
+                             catalog: catalog, version: "1.0", privacySightings: sightings, privacyPhotos: photos)
     }
 
-    static func csv(drive: Drive, sightings: [Sighting], catalog: SpeciesCatalog) throws -> String {
+    static func csv(drive: Drive, sightings: [Sighting], photos: [PhotoItem] = [], catalog: SpeciesCatalog) throws -> String {
         let window = try DriveWindow(start: drive.startedAt, end: drive.endedAt)
-        return Exporters.csv(sightings: window.sightings(from: sightings).sorted { $0.t < $1.t }, catalog: catalog)
+        return Exporters.csv(sightings: window.sightings(from: sightings).sorted { $0.t < $1.t }, catalog: catalog,
+                             privacySightings: sightings, privacyPhotos: photos)
     }
 
     static func createFile(_ content: String, extension suffix: String,

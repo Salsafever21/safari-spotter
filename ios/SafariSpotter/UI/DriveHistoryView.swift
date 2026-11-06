@@ -170,7 +170,7 @@ struct SavedDriveView: View {
                     .disabled(route == nil || routeError != nil)
                 Button { export(gpx: false) } label: { Label("Sichtungen dieser Fahrt als CSV teilen", systemImage: "tablecells") }
                     .disabled(window == nil)
-                Text("Die GPX-Datei enthält nur diese Fahrt. Spurpunkte in der Nähe von Nashorn-Sichtungen werden ausgelassen; Nashorn-Zeiten und Standorte bleiben gerundet.")
+                Text("Die GPX-Datei enthält nur diese Fahrt. Spurpunkte innerhalb von 15 Minuten um geschützte Sichtungen oder Fotos werden ausgelassen. Auch Wegpunkte anderer Tiere in diesem Zeitfenster erhalten einen 10-km-Standort und eine gerundete Zeit.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -207,8 +207,8 @@ struct SavedDriveView: View {
         do {
             try DriveHistoryExport.removeStale()
             let content: String
-            if gpx { content = try DriveHistoryExport.gpx(drive: saved, sightings: allSightings, catalog: catalog) }
-            else { content = try DriveHistoryExport.csv(drive: saved, sightings: allSightings, catalog: catalog) }
+            if gpx { content = try DriveHistoryExport.gpx(drive: saved, sightings: allSightings, photos: allPhotos, catalog: catalog) }
+            else { content = try DriveHistoryExport.csv(drive: saved, sightings: allSightings, photos: allPhotos, catalog: catalog) }
             share = DriveShare(url: try DriveHistoryExport.createFile(content, extension: gpx ? "gpx" : "csv"))
         } catch { actionError = error.localizedDescription }
     }

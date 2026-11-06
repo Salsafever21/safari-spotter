@@ -75,6 +75,24 @@ final class CountryProfilesTests: XCTestCase {
         XCTAssertEqual(SpeciesDecision.decide(adjusted, catalog: catalog).key, "karakal")
     }
 
+    func testCountryCannotResolveAnUncertainSpeciesGroup() throws {
+        let catalog = SpeciesCatalog.shared
+        for (first, second, country) in [("breitmaulnashorn", "spitzmaulnashorn", "ZA"),
+                                          ("spitzmaulnashorn", "breitmaulnashorn", "KE"),
+                                          ("loewe_m", "loewin", "BW")] {
+            let a = try XCTUnwrap(catalog.classes.firstIndex { $0.key == first })
+            let b = try XCTUnwrap(catalog.classes.firstIndex { $0.key == second })
+            let other = try XCTUnwrap(catalog.classes.firstIndex { $0.key == "anderes_hund" })
+            var probabilities = [Double](repeating: 0, count: catalog.classes.count)
+            probabilities[a] = 0.55; probabilities[b] = 0.30; probabilities[other] = 0.15
+            let before = SpeciesDecision.decide(probabilities, catalog: catalog)
+            XCTAssertTrue(before.key?.hasPrefix("group:") == true)
+            let adjusted = catalog.applyPrior(probabilities, region: nil, destinationCode: country)
+            XCTAssertEqual(adjusted, probabilities)
+            XCTAssertEqual(SpeciesDecision.decide(adjusted, catalog: catalog).key, before.key)
+        }
+    }
+
     func testHabitatsAllowGroundAirAndWater() {
         let catalog = SpeciesCatalog.shared
         XCTAssertTrue(catalog.habitats(for: "elefant").contains(.ground))

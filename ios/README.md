@@ -8,7 +8,7 @@ Beim ersten Start fragt das Reise-Onboarding nach Ausgangsland und Reiseziel. Ze
 Modell erkennbare Arten mit offiziellen Quellen. Alle anderen Länder sind ebenfalls wählbar und nutzen die allgemeine
 Erkennung. Bei bereits sicher erkannten Tieren gibt das Reiseziel belegten Arten einen schwachen Faktor von 1,25, das
 Ausgangsland einen Faktor von 1,15. Die Faktoren gelten nur für die bereits vom Modell gewählte Art. Unsichere Treffer,
-Haustiere und andere Arten werden dadurch nicht zu einer neuen oder anderen Safari-Sichtung. Bestehendes
+Haustiere und Sammelnamen werden dadurch nicht zu einer neuen oder genaueren Safari-Sichtung. Bestehendes
 GPS-Vorwissen für südafrikanische Teilregionen bleibt zusätzlich aktiv. Der Tierführer im Kamerabild ordnet Arten nach
 Boden, Luft und Wasser ein und zeigt die Quellen. Er ist keine vollständige Verbreitungskarte. Südafrika enthält Elefanten,
 wie SANParks für Kruger und Addo dokumentiert. Eine Auswahl nach Park oder Reservat ist für eine spätere Ausbaustufe
@@ -17,11 +17,17 @@ Beim Onboarding wird die Kamera noch nicht geöffnet; der SwiftData-Speicher und
 
 Unter **Sichtungen → Karte** zeigt die Gesamtkarte alle Aufnahmen. Jede gespeicherte Fahrt lässt sich separat öffnen:
 Route, Statistik, Stopps, Kilometer-Splits, Sichtungen und Fotos werden für ihren gespeicherten Zeitraum angezeigt.
-GPX und CSV lassen sich für genau diese Fahrt teilen. Der GPX-Artenschutz berücksichtigt auch Nashorn-Sichtungen kurz
-ausserhalb des Fahrtzeitraums, damit angrenzende Spurpunkte geschützt bleiben. Die Exportkoordinaten werden erneut
+GPX und CSV lassen sich für genau diese Fahrt teilen. Der Artenschutz berücksichtigt auch Nashorn-Sichtungen und
+geschützte Fotos kurz ausserhalb des Fahrtzeitraums, damit angrenzende Spurpunkte geschützt bleiben. Andere Sichtungen
+innerhalb von 15 Minuten werden beim Export ebenfalls vergröbert und zeitlich gerundet. Die Exportkoordinaten werden erneut
 vergröbert, falls ein älterer Eintrag trotz sensibler Art noch eine genaue Position enthält. Unlesbare Routen werden
 gemeldet und können nicht als scheinbar vollständige GPX-Datei exportiert werden. Die Originaldaten bleiben erhalten.
 Exportdateien werden erst beim Tippen erstellt und nach Abschluss oder Abbruch der Freigabe entfernt.
+Beim Sichern geschützter Fotos in die Fotos-Mediathek wird die Aufnahmezeit auf die Stunde gerundet. Die exportierte
+Bilddatei wird ohne Quell-Metadaten neu geschrieben, damit keine zweite ursprüngliche Zeitangabe mitgeht.
+Verifiziert am 6. November 2026 mit Xcode 27.2: 78 Logiktests und vier UI-Abläufe im Simulator, 111 eigenständige Swift-Prüfungen und der Abgleich
+mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
+getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
 die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8

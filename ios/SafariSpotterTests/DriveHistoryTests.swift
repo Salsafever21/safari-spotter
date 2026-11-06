@@ -74,6 +74,39 @@ final class DriveHistoryTests: StoreTestCase {
         XCTAssertFalse(rhino.coarse)
     }
 
+    func testNearbyOtherSpeciesCannotRevealProtectedWaypoint() throws {
+        let rhino = sighting("Spitzmaulnashorn", at: -10)
+        let impala = sighting("Impala", at: 100)
+        let drive = try Drive(startedAt: start, endedAt: start.addingTimeInterval(3600), dist: 1000,
+                              points: [point(890, latitude: -20), point(1800, latitude: -21)], sightings: 1)
+        let gpx = try DriveHistoryExport.gpx(drive: drive, sightings: [rhino, impala], catalog: catalog)
+        XCTAssertFalse(gpx.contains("<name>Spitzmaulnashorn</name>"))
+        XCTAssertTrue(gpx.contains("<name>Impala</name>"))
+        XCTAssertTrue(gpx.contains("lat=\"\(String(format: "%.3f", coarsePosition.lat))\""))
+        XCTAssertFalse(gpx.contains(String(format: "%.5f", exact.lat)))
+        XCTAssertFalse(gpx.contains("<trkpt lat=\"-20.0\""), "Auch die Grenze genau 15 Minuten nach dem Nashorn ist geschützt")
+        let csv = try DriveHistoryExport.csv(drive: drive, sightings: [rhino, impala], catalog: catalog)
+        XCTAssertTrue(csv.contains("(gerundet);Impala"))
+        XCTAssertFalse(csv.contains(String(format: "%.5f", exact.lat)))
+        XCTAssertFalse(impala.coarse, "Die gespeicherte Sichtung darf nicht verändert werden")
+    }
+
+    func testProtectedPhotoWithoutSightingStillProtectsRouteAndOtherWaypoints() throws {
+        let impala = sighting("Impala", at: 100)
+        let photo = addPhoto(species: ["Impala"], dets: [PhotoDet(x: 0, y: 0, w: 4, h: 4,
+                            name: "Spitzmaulnashorn", conf: 0.8, sure: true)], sightingIds: [])
+        photo.t = start.addingTimeInterval(-10)
+        let drive = try Drive(startedAt: start, endedAt: start.addingTimeInterval(3600), dist: 1000,
+                              points: [point(5, latitude: -20), point(1800, latitude: -21)], sightings: 1)
+        let gpx = try DriveHistoryExport.gpx(drive: drive, sightings: [impala], photos: [photo], catalog: catalog)
+        XCTAssertFalse(gpx.contains("<trkpt lat=\"-20.0\""))
+        XCTAssertTrue(gpx.contains("<trkpt lat=\"-21.0\""))
+        XCTAssertFalse(gpx.contains(String(format: "%.5f", exact.lat)))
+        XCTAssertEqual(PhotoExporter.exportDate(for: photo, isSensitive: isSensitive), Exporters.hourFloor(photo.t))
+        let ordinary = addPhoto(species: ["Impala"], sightingIds: [])
+        XCTAssertEqual(PhotoExporter.exportDate(for: ordinary, isSensitive: isSensitive), ordinary.t)
+    }
+
     func testCorruptRouteStopsExportAndFilesAreIndependentSnapshots() throws {
         let drive = try Drive(startedAt: start, endedAt: start.addingTimeInterval(10), dist: 0, points: [], sightings: 0)
         drive.pointsJSON = Data("corrupt".utf8)
