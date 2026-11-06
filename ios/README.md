@@ -277,9 +277,15 @@ xcrun swift ios/Tools/model-check/main.swift ios/Models/SafariSpotterSpecies.mlp
   Videoaufnahme muss mit dem nächsten TestFlight-Build auf dem Gerät geprüft werden.
 - **Erkennungsqualität**: Die Core-ML-Erkennung läuft auf dem Gerät, ihre Treffergenauigkeit wurde noch nicht systematisch
   mit echten Tieraufnahmen vermessen. Die Trainingsbilder für das vorbereitete YOLO-Modell liegen derzeit nicht im Repository.
-  `ios/Tools/model-check/main.swift` prüft den vorhandenen Core-ML-Artenkopf auf einem lokalen Bildordner. Auf 91 neu
-  geladenen Elefantenfotos waren 76 Top-1-Treffer; diese Bilder können mit dem bisherigen Trainingssatz überlappen und
-  belegen keine Feldgenauigkeit. Ein Nachtbild wurde deutlich falsch als Nashorn eingestuft.
+  `ios/Tools/model-check/main.swift` prüft den vorhandenen Core-ML-Artenkopf auf einem lokalen Bildordner und meldet
+  Top 1, Top 3, Verwechslungen innerhalb derselben Artgruppe, stark selbstsichere Fehler sowie die Mac-Laufzeit.
+  Auf 228 lokal geladenen Fotos aus vier Klassen (Elefant, Breitmaulnashorn, Impala, Leopard) waren 186 Top-1-Treffer,
+  210 Top-3-Treffer und 196 Treffer, wenn die zwei Nashornarten als eine Gruppe zählen. Zehn Fehler hatten mindestens
+  70 % Modellkonfidenz. Die Sichtprüfung zeigte auch fehlerhafte oder gemischte Bildinhalte: Ein angebliches Elefantenfoto
+  zeigte ein Nashorn, ein Impalafoto zusätzlich einen grossen Elefanten. Die Bilder können zudem mit dem bisherigen
+  Trainingssatz überlappen. Diese Zahlen belegen keine Feldgenauigkeit und sind keine Grundlage für neue Schwellen.
+  Der gemessene Mac-Median von rund 2 ms betrifft nur den Artenkopf, nicht Detektor, Kacheln und iPhone-Kamera.
+  Ein Nachtbild wurde deutlich falsch als Nashorn eingestuft.
   Abweichung zur Web-App
   bei der NMS: coco-ssd nutzt `minScore` auch als IoU-Schwelle und höchstens 10 Rahmen je Durchlauf, die Core-ML-NMS fest
   IoU 0,5 ohne Obergrenze; die Zusammenführung danach (`VisionPipeline.merge`) gleicht das grösstenteils aus.
