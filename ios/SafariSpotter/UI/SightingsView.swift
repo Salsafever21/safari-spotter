@@ -306,13 +306,15 @@ struct ReviewView: View {
                 Button("Geprüfte löschen", role: .destructive) { confirmDeleteDone = true }
             }
         }
-        .sheet(item: $activeSheet, onDismiss: cleanupExport) { sheet in
+        .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .picker(let c):
                 SpeciesPicker(predicted: c.predicted) { name, key in
                     c.status = "corrected"; c.label = name; c.labelKey = key; commit("Korrektur speichern")
                 }
-            case .share(let url): CorrectionShareSheet(url: url)
+            case .share(let url):
+                CorrectionShareSheet(url: url) { completeExport(url) }
+                    .interactiveDismissDisabled()
             }
         }
         .confirmationDialog("Alle geprüften Einträge löschen?", isPresented: $confirmDeleteDone) {
@@ -328,14 +330,16 @@ struct ReviewView: View {
     }
     private func exportCorrections() {
         do {
+            try? CorrectionExporter.removeStale()
             let url = try CorrectionExporter.create(done)
             exportedURL = url
             activeSheet = .share(url)
         } catch { storageError = "Korrekturen konnten nicht exportiert werden: \(error.localizedDescription)" }
     }
-    private func cleanupExport() {
-        if let exportedURL { try? FileManager.default.removeItem(at: exportedURL) }
-        exportedURL = nil
+    private func completeExport(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        if exportedURL == url { exportedURL = nil }
+        if case .share(let shown) = activeSheet, shown == url { activeSheet = nil }
     }
 }
 
@@ -352,8 +356,13 @@ private enum ReviewSheet: Identifiable {
 
 private struct CorrectionShareSheet: UIViewControllerRepresentable {
     let url: URL
+    let onComplete: () -> Void
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async { onComplete() }
+        }
+        return controller
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

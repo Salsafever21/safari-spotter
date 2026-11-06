@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import Photos
 import ImageIO
+import CoreImage
 import UniformTypeIdentifiers
 
 /// Exporte mit Artenschutz: Nashorn-Sichtungen nur mit 10-km-Raster und auf die Stunde gerundeter Zeit, Spur ±15 min ausgeblendet.
@@ -54,16 +55,23 @@ enum Exporters {
 /// Creates a stable snapshot of reviewed classifier crops only when the user exports them.
 @MainActor
 enum CorrectionExporter {
+    private static let prefix = "safari-spotter-korrekturen-"
+    private static let imageContext = CIContext(options: [.cacheIntermediates: false])
     enum ExportError: LocalizedError {
-        case empty
-        var errorDescription: String? { "Keine geprüften Korrekturen zum Exportieren vorhanden." }
+        case empty, invalidImage
+        var errorDescription: String? {
+            switch self {
+            case .empty: return "Keine geprüften Korrekturen zum Exportieren vorhanden."
+            case .invalidImage: return "Ein Korrekturbild konnte nicht ohne Metadaten exportiert werden."
+            }
+        }
     }
 
     static func create(_ corrections: [Correction],
                        directory: URL = FileManager.default.temporaryDirectory) throws -> URL {
         guard !corrections.isEmpty else { throw ExportError.empty }
-        let items: [[String: Any]] = corrections.map { c in
-            ["img": "data:image/jpeg;base64," + c.image.base64EncodedString(),
+        let items: [[String: Any]] = try corrections.map { c in
+            ["img": "data:image/jpeg;base64," + (try jpegWithoutMetadata(c.image)).base64EncodedString(),
              "predicted": c.predicted ?? NSNull(), "predKey": c.predKey ?? NSNull(),
              "conf": c.conf ?? NSNull(), "label": c.label ?? NSNull(),
              "labelKey": c.labelKey ?? NSNull(), "status": c.status,
@@ -73,7 +81,7 @@ enum CorrectionExporter {
                                       "exported": ISO8601DateFormatter().string(from: .now),
                                       "items": items]
         let data = try JSONSerialization.data(withJSONObject: payload)
-        let url = directory.appendingPathComponent("safari-spotter-korrekturen-\(UUID().uuidString).json")
+        let url = directory.appendingPathComponent("\(prefix)\(UUID().uuidString).json")
         do {
             try data.write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
@@ -81,6 +89,32 @@ enum CorrectionExporter {
         } catch {
             try? FileManager.default.removeItem(at: url)
             throw error
+        }
+    }
+
+    private static func jpegWithoutMetadata(_ data: Data) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let pixels = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw ExportError.invalidImage }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.int32Value ?? 1
+        let image = CIImage(cgImage: pixels).oriented(forExifOrientation: orientation)
+        let upright = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX,
+                                                               y: -image.extent.minY))
+        guard let jpeg = imageContext.jpegRepresentation(of: upright, colorSpace: CGColorSpaceCreateDeviceRGB(),
+            options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.9])
+        else { throw ExportError.invalidImage }
+        return jpeg
+    }
+
+    /// Removes only this exporter's abandoned temporary files; a current share remains untouched.
+    static func removeStale(in directory: URL = FileManager.default.temporaryDirectory,
+                            before cutoff: Date = Date().addingTimeInterval(-3600)) throws {
+        let files = try FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey])
+        for file in files where file.lastPathComponent.hasPrefix(prefix) && file.pathExtension == "json" {
+            let values = try file.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard values.isRegularFile == true, let changed = values.contentModificationDate, changed < cutoff else { continue }
+            try FileManager.default.removeItem(at: file)
         }
     }
 }

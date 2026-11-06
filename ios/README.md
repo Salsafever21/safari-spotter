@@ -48,7 +48,9 @@ Der Bildbetrachter verwendet bei älteren Fotos ohne gespeicherte Abmessungen di
 einen Hinweis, falls ein Foto nicht dekodiert werden kann.
 Der Export der geprüften Korrekturen erzeugt die JSON-Datei erst beim Tippen auf **Korrekturen exportieren**. Jede
 Freigabe erhält eine eigene Datei, damit Änderungen an der Prüfliste eine bereits geöffnete Freigabe nicht überschreiben;
-Schreibfehler erscheinen in der App. Die temporäre Datei wird nach dem Schliessen des Teilen-Dialogs entfernt.
+Schreibfehler erscheinen in der App. Die exportierten Bildausschnitte werden ohne EXIF- und GPS-Metadaten neu kodiert.
+Die temporäre Datei wird erst nach Abschluss oder Abbruch der Teilen-Aktion entfernt;
+ältere liegengebliebene Exportdateien werden beim nächsten Export bereinigt.
 
 ## Bauen
 
