@@ -57,9 +57,9 @@ Verifiziert am 6. November 2026 mit Xcode 27.2: 110 Tests im Simulator, 111 eige
 mit der Web-Logik bestanden; der unsignierte iOS-Release-Build baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
-Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
-die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8
-enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen; seine TestFlight-Bereitstellung steht noch aus.
+Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 8 wurde um 19:41 Uhr MEZ erfolgreich
+zu App Store Connect hochgeladen; Apple meldet die Verarbeitung des Pakets. Die Zuweisung zur internen TestFlight-Gruppe
+ist noch nicht bestätigt. Build 8 enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen.
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.
