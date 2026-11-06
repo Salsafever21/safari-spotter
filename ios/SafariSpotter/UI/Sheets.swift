@@ -166,8 +166,7 @@ struct SettingsView: View {
     @State private var backupToDelete: URL?
     @State private var importedArchives: [URL] = []
     @State private var archiveToDelete: URL?
-    @State private var creatingProtectedBackup = false
-    @State private var unlockingProtectedBackup = false
+    @State private var passwordSheet: BackupPasswordSheet.Mode?
     @State private var pendingEncryptedURL: URL?
     @State private var pendingEncryptedIsLocal = false
     @State private var backupBusy = false
@@ -211,7 +210,7 @@ struct SettingsView: View {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
                         .disabled(importBlocked)
                     if pendingEncryptedURL != nil {
-                        Button("Passwort erneut eingeben") { unlockingProtectedBackup = true }
+                        Button("Passwort erneut eingeben") { passwordSheet = .unlock }
                             .disabled(importBlocked)
                     }
                     if drive.active || camera.recordingStarting || camera.recording || camera.recordingFinishing {
@@ -234,7 +233,7 @@ struct SettingsView: View {
                     }
                 }
                 Section("Daten sichern") {
-                    Button("Passwortgeschützte Sicherung erstellen") { creatingProtectedBackup = true }
+                    Button("Passwortgeschützte Sicherung erstellen") { passwordSheet = .create }
                         .disabled(backupBusy || camera.recordingStarting || camera.recording || camera.recordingFinishing)
                     if camera.recordingStarting || camera.recording || camera.recordingFinishing {
                         Text("Videoaufnahme beenden und speichern lassen, bevor du eine vollständige Sicherung erstellst.")
@@ -260,6 +259,7 @@ struct SettingsView: View {
                                 Button("Entfernen", role: .destructive) { backupToDelete = file }
                                     .disabled(backupBusy)
                             }
+                            .buttonStyle(.borderless)
                         }
                     }
                     Text("Enthält Sichtungen, Fotos, Videos, Korrekturen, Game Drives und Einstellungen. Eine lokale Sicherung lässt sich hier mit dem Passwort direkt wiederherstellen.")
@@ -285,11 +285,14 @@ struct SettingsView: View {
                     }
                     catch { backupMessage = "Lokale Sicherungen konnten nicht gelesen werden: \(error.localizedDescription)" }
                 }
-                .sheet(isPresented: $creatingProtectedBackup) {
-                    BackupPasswordSheet(mode: .create) { password in createProtectedBackup(password) }
-                }
-                .sheet(isPresented: $unlockingProtectedBackup) {
-                    BackupPasswordSheet(mode: .unlock) { password in restoreProtectedBackup(password) }
+                .sheet(item: $passwordSheet) { mode in
+                    BackupPasswordSheet(mode: mode) { password in
+                        passwordSheet = nil
+                        switch mode {
+                        case .create: createProtectedBackup(password)
+                        case .unlock: restoreProtectedBackup(password)
+                        }
+                    }
                 }
                 .confirmationDialog("Archivierte Originaldatei entfernen?", isPresented: Binding(
                     get: { archiveToDelete != nil }, set: { if !$0 { archiveToDelete = nil } })) {
@@ -384,7 +387,7 @@ struct SettingsView: View {
             pendingEncryptedURL = copy
             pendingEncryptedIsLocal = false
             backupMessage = "Verschlüsselte Sicherung ausgewählt. Passwort zum Wiederherstellen eingeben."
-            unlockingProtectedBackup = true
+            passwordSheet = .unlock
         } else {
             let report = try WebBackupImporter.perform(url: url, context: context)
             backupMessage = "Importiert: \(report.sightings) Sichtungen, \(report.photos) Fotos, \(report.corrections) Korrekturen und \(report.drives) Fahrten. Original gesichert."
@@ -402,7 +405,7 @@ struct SettingsView: View {
         pendingEncryptedURL = file
         pendingEncryptedIsLocal = true
         backupMessage = "Lokale Sicherung ausgewählt. Passwort zum Wiederherstellen eingeben."
-        unlockingProtectedBackup = true
+        passwordSheet = .unlock
     }
 
     private func restoreProtectedBackup(_ password: String) {
@@ -447,7 +450,10 @@ struct SettingsView: View {
 }
 
 private struct BackupPasswordSheet: View {
-    enum Mode { case create, unlock }
+    enum Mode: String, Identifiable {
+        case create, unlock
+        var id: String { rawValue }
+    }
     let mode: Mode
     let onSubmit: (String) -> Void
     @Environment(\.dismiss) private var dismiss

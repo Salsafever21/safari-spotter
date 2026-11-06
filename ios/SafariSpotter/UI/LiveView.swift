@@ -154,7 +154,8 @@ struct LiveView: View {
                 .disabled(camera.permission != .granted || camera.capturingPhoto)
                 Button { photoAnalysis = true } label: { Image(systemName: "photo.on.rectangle") }
                     .pill().accessibilityLabel("Bilder analysieren")
-                Button { showSettings = true } label: { Image(systemName: "gearshape") }.pill()
+                Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    .pill().accessibilityLabel("Einstellungen")
             }
         }
         .padding(.bottom, 10)

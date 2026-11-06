@@ -89,7 +89,8 @@ Import keine Duplikate an. Für spätere Sicherungen unter **Einstellungen → D
 12 Zeichen vergeben, danach über **Teilen** eine Kopie ausserhalb der App sichern. Fertige verschlüsselte Sicherungen
 bleiben im geschützten App-Speicher auch nach einem Neustart verfügbar und können einzeln direkt wiederhergestellt,
 geteilt oder entfernt werden. Die direkte Wiederherstellung behält die verschlüsselte Datei und erzeugt keine zweite
-Archivkopie im App-Speicher.
+Archivkopie im App-Speicher. Ein Simulator-UI-Test prüft den gesamten Weg vom Erstellen über die Passwortabfrage bis
+zur Wiederherstellung und bestätigt, dass die Datei danach weiter verfügbar ist.
 Beim Öffnen der Einstellungen übernimmt die App auch vollständig geschriebene temporäre Sicherungen aus früheren Builds;
 unvollständige Dateien werden erkannt und nicht als fertige Sicherung angeboten.
 Beim Löschen der App verschwinden diese lokalen Kopien; die externe Kopie bleibt deshalb wichtig. Die iOS-App verschlüsselt die
