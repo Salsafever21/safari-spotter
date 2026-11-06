@@ -3,7 +3,7 @@ import XCTest
 final class BackupUITests: XCTestCase {
     func testLocalBackupCanBeRestoredAndRemainsAvailable() {
         let app = XCUIApplication()
-        app.launch()
+        app.launchAndCompleteTravelSetupIfNeeded()
         let settings = app.buttons["Einstellungen"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()

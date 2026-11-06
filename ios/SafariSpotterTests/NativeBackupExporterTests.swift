@@ -46,6 +46,33 @@ final class NativeBackupExporterTests: StoreTestCase {
         XCTAssertFalse(settings.burnIn)
     }
 
+    func testTravelSetupSurvivesNativeBackup() throws {
+        let settings = AppSettings.shared
+        let originalOrigin = settings.originCountry
+        let originalDestination = settings.destinationCountry
+        let originalComplete = settings.onboardingComplete
+        defer {
+            settings.originCountry = originalOrigin
+            settings.destinationCountry = originalDestination
+            settings.onboardingComplete = originalComplete
+        }
+        settings.originCountry = "CH"
+        settings.destinationCountry = "ZA"
+        settings.onboardingComplete = true
+        let raw = try NativeBackupExporter.create(context: context)
+        defer { try? FileManager.default.removeItem(at: raw) }
+        settings.originCountry = ""
+        settings.destinationCountry = ""
+        settings.onboardingComplete = false
+        let restored = try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self,
+                                          configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let result = try WebBackupImporter.perform(url: raw, context: ModelContext(restored))
+        defer { try? FileManager.default.removeItem(at: result.archiveURL) }
+        XCTAssertEqual(settings.originCountry, "CH")
+        XCTAssertEqual(settings.destinationCountry, "ZA")
+        XCTAssertTrue(settings.onboardingComplete)
+    }
+
     func testNativeBackupRestoresDataAndCanBeImportedTwice() throws {
         let sighting = addSighting("Breitmaulnashorn", position: coarsePosition)
         let photo = addPhoto(species: ["Breitmaulnashorn"], position: coarsePosition,

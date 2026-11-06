@@ -40,11 +40,18 @@ weiterhin auf beiden Seiten liegen, deshalb bleibt ein unabhängiger Feldtest n�
 `train.js` verlangt mindestens 20 Trainings- und 3 Validierungsfotos pro Art sowie eine neue `HEAD_VERSION` und
 überschreibt vorhandene Modellversionen nicht. Der bisherige Artenkopf bleibt dadurch bis zu einer ausdrücklichen
 Qualitätsprüfung erhalten.
+Foto- und Manifest-Prüfsummen im Embedding-Index verhindern, dass ein später ausgeschlossenes oder geändertes Foto
+unbemerkt in einem neuen Artenkopf bleibt; nach jeder Datenänderung müssen die Embeddings neu erzeugt werden.
 Ein Export trainiert das Modell nicht automatisch: Nach dem Import müssen `embed.js`, `train.js` und für iOS die
 Core-ML-Konvertierung aus `ios/README.md` erneut laufen. Die lokale Testmenge allein belegt keine Erkennungsqualität im Feld.
 
 ## Native iOS-App
 
 `ios/` enthält die Vorbereitung für eine echte iOS-App mit denselben Funktionen: beide Modelle als Core ML (`ios/Models/`, Konvertierung in `training/coreml/`), ein SwiftUI-Projekt (`xcodegen generate` in `ios/`) und ein Abgleich der Swift-Logik mit `app.js` (`ios/Tools/logic-check/run.sh`). Der eigene Ein-Modell-Detektor (YOLO) ist in `training/yolo/` vorbereitet. Details in `ios/README.md`.
+
+Die native App hat ein Reise-Onboarding mit Ausgangsland und Reiseziel. Zehn Länderprofile aus offiziellen Park- und
+Naturschutzquellen geben der Erkennung ein schwaches Vorwissen für beide Länder; andere Arten bleiben erkennbar. Ein Tierführer zeigt die
+im Modell enthaltenen Tiere nach Boden, Luft und Wasser. Die Auswahl nach einzelnen Parks und Reservaten folgt später.
+Reiseauswahl, Sichtungen und Fotos sind in der nativen Sicherung enthalten.
 
 Version: 1.5.3 (Web), iOS-Vorbereitung 1.0.0

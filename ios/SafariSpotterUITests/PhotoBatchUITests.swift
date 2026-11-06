@@ -3,7 +3,7 @@ import XCTest
 final class PhotoBatchUITests: XCTestCase {
     func testTwoPhotosAdvanceAfterFirstSave() {
         let app = XCUIApplication()
-        app.launch()
+        app.launchAndCompleteTravelSetupIfNeeded()
         let analyze = app.buttons["Bilder analysieren"]
         XCTAssertTrue(analyze.waitForExistence(timeout: 10))
         analyze.tap()

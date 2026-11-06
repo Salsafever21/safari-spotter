@@ -3,6 +3,17 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
+Beim ersten Start fragt das Reise-Onboarding nach Ausgangsland und Reiseziel. Zehn recherchierte Länderprofile
+(Südafrika, Namibia, Botswana, Simbabwe, Sambia, Mosambik, Tansania, Kenia, Uganda und Ruanda) nennen im bestehenden
+Modell erkennbare Arten mit offiziellen Quellen. Alle anderen Länder sind ebenfalls wählbar und nutzen die allgemeine
+Erkennung. Das Reiseziel gibt belegten Arten einen schwachen Faktor von 1,25, das Ausgangsland einen Faktor von 1,15;
+andere Arten bleiben erkennbar. Bestehendes
+GPS-Vorwissen für südafrikanische Teilregionen bleibt zusätzlich aktiv. Der Tierführer im Kamerabild ordnet Arten nach
+Boden, Luft und Wasser ein und zeigt die Quellen. Er ist keine vollständige Verbreitungskarte. Südafrika enthält Elefanten,
+wie SANParks für Kruger und Addo dokumentiert. Eine Auswahl nach Park oder Reservat ist für eine spätere Ausbaustufe
+vorgesehen. Die Reiseauswahl kann in den Einstellungen geändert werden und ist in der nativen Sicherung enthalten.
+Beim Onboarding wird die Kamera noch nicht geöffnet; der SwiftData-Speicher und die bisherigen Sichtungen bleiben erhalten.
+
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
 die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8
 enthält weitere Datenschutz- und Speicherverbesserungen; die TestFlight-Bereitstellung folgt nach Sandros Rückkehr.
@@ -141,9 +152,10 @@ ios/
     Core/Location/DriveRecorder      GPS, Region, Game Drive (Punkte, Statistik, Hintergrund), wie tripStats()
     Core/Export/Exporters.swift      CSV, GPX (Artenschutz-Regeln), JPEG mit EXIF/GPS in die Fotos-Mediathek
     UI/LiveView.swift                Kamerabild, Overlay, Tracken, Game Drive, Zoom
+    UI/TravelViews.swift             Reise-Onboarding, Länderauswahl und Tierführer
     UI/SightingsView.swift           Liste, Zählung, Karte (MapKit), Galerie, Prüfen
     UI/Sheets.swift                  Artwahl, Korrektur, Steckbrief, Game Drive live, Einstellungen, Bildanalyse
-    Resources/                       species-info.json, regions.json, species-labels.json (Kopien aus data/ und Models/)
+    Resources/                       species-info.json, regions.json, species-labels.json, country-profiles.json
   SafariSpotterTests/                XCTests: Bildausschnitte, Artenschutz, Korrektur, Backup und Restore, Videoaufnahme
   Tools/logic-check/                 Abgleich Swift ↔ app.js (siehe unten)
   Tools/unit-check/                  Prüfungen der reinen Swift-Regeln ohne iOS-SDK (siehe unten)

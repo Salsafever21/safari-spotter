@@ -170,6 +170,7 @@ struct SettingsView: View {
     @State private var pendingEncryptedURL: URL?
     @State private var pendingEncryptedIsLocal = false
     @State private var backupBusy = false
+    @State private var changeTrip = false
     private let backupStore = ProtectedBackupStore()
     private var importBlocked: Bool {
         backupBusy || drive.active || camera.recordingStarting || camera.recording || camera.recordingFinishing
@@ -180,6 +181,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Reise") {
+                    Button("Länder auswählen") { changeTrip = true }
+                    Text("Reiseziel: \(settings.destinationCountry.isEmpty ? "nicht gewählt" : catalog.country(settings.destinationCountry)?.name ?? settings.destinationCountry)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Das Länderprofil gewichtet belegte Arten leicht. Die genauere Auswahl nach Park oder Reservat folgt später.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Erkennung") {
                     VStack(alignment: .leading) { Text("Empfindlichkeit: Schwelle \(Int(settings.threshold * 100)) %"); Slider(value: $settings.threshold, in: 0.25...0.75, step: 0.05) }
                     Toggle("Namen einblenden", isOn: $settings.labels)
@@ -271,6 +279,7 @@ struct SettingsView: View {
                 }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
+                .sheet(isPresented: $changeTrip) { TravelSetupView(firstLaunch: false) }
                 .interactiveDismissDisabled(backupBusy)
                 .onAppear {
                     importedArchives = WebBackupImporter.archivedFiles()

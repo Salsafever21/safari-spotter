@@ -14,6 +14,7 @@ struct LiveView: View {
     @Query(sort: \Sighting.t, order: .reverse) private var sightings: [Sighting]
     @State private var showSightings = false
     @State private var showSettings = false
+    @State private var showGuide = false
     @State private var showDrive = false
     @State private var correction: CorrectionTarget?
     @State private var photoAnalysis = false
@@ -71,6 +72,7 @@ struct LiveView: View {
         }
         .sheet(isPresented: $showSightings) { SightingsView(camera: camera).environmentObject(catalog).environmentObject(drive) }
         .sheet(isPresented: $showSettings) { SettingsView(camera: camera) }
+        .sheet(isPresented: $showGuide) { SafariGuideView() }
         .sheet(isPresented: $showDrive) { DriveLiveView(sightings: sightings) }
         .sheet(item: $correction) { target in CorrectionSheet(target: target, camera: camera) }
         .sheet(isPresented: $photoAnalysis) { PhotoAnalysisView(camera: camera) }
@@ -95,6 +97,8 @@ struct LiveView: View {
             HStack {
                 Label(camera.status, systemImage: camera.tracking ? "circle.fill" : "circle").pill()
                 Spacer()
+                Button { showGuide = true } label: { Image(systemName: "book.closed") }
+                    .pill().accessibilityLabel("Tierführer für das Reiseziel")
                 if let started = camera.recordingStartedAt { RecordingTimer(startedAt: started) }
                 if camera.tracking { Text("\(Int(camera.fps)) fps").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }

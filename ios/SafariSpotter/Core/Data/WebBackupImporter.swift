@@ -279,5 +279,8 @@ enum WebBackupImporter {
         if let v = value["res"] as? String { settings.res = v }
         if let v = value["lensID"] as? String { settings.lensID = v }
         if let v = value["burnIn"] as? Bool { settings.burnIn = v }
+        if let v = value["originCountry"] as? String { settings.originCountry = v }
+        if let v = value["destinationCountry"] as? String { settings.destinationCountry = v }
+        if let v = value["onboardingComplete"] as? Bool { settings.onboardingComplete = v }
     }
 }

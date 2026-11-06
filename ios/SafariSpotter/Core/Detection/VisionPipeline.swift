@@ -78,7 +78,8 @@ final class VisionPipeline {
     func probs(fromDetector species: [String: Double], region: Region?) -> [Double] {
         var v = catalog.classes.map { species[$0.key] ?? 0 }
         let s = v.reduce(0, +); if s > 0 { v = v.map { $0 / s } }
-        return catalog.applyPrior(v, region: region)
+        return catalog.applyPrior(v, region: region, originCode: AppSettings.shared.originCountry,
+                                  destinationCode: AppSettings.shared.destinationCountry)
     }
 
     /// Vollbild plus optional n×n überlappende Kacheln (Fernerkennung), zusammengeführt
@@ -147,7 +148,8 @@ final class VisionPipeline {
         for obs in request.results as? [VNClassificationObservation] ?? [] {
             if let i = index[obs.identifier] { probs[i] = Double(obs.confidence) }
         }
-        return catalog.applyPrior(probs, region: region)
+        return catalog.applyPrior(probs, region: region, originCode: AppSettings.shared.originCountry,
+                                  destinationCode: AppSettings.shared.destinationCountry)
     }
 
     /// JPEG-Ausschnitt (224 px) für Korrekturen und Thumbnails

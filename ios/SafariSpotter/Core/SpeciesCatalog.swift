@@ -41,6 +41,30 @@ struct Region: Codable, Identifiable {
 struct RegionsFile: Codable { let factor: Double; let regions: [Region] }
 struct LabelsFile: Codable { let version: String?; let trained: String?; let valTop1: Double?; let classes: [SpeciesClass] }
 
+/// Nachweisbare Beispiele aus offiziellen Park- und Naturschutzquellen. Keine vollständige Verbreitungskarte.
+struct CountryProfile: Codable, Identifiable {
+    let code: String
+    let name: String
+    let featured: [String]
+    let sources: [String]
+    var id: String { code }
+}
+struct CountryProfilesFile: Codable { let profiles: [CountryProfile] }
+
+enum AnimalHabitat: String, CaseIterable, Identifiable {
+    case ground = "Boden"
+    case air = "Luft"
+    case water = "Wasser"
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .ground: "pawprint.fill"
+        case .air: "bird.fill"
+        case .water: "water.waves"
+        }
+    }
+}
+
 /// Artenwissen der App: Klassen, Steckbriefe, Regionen. Entspricht classes.json + species-info.json + regions.json der Web-App.
 final class SpeciesCatalog: ObservableObject {
     static let shared = SpeciesCatalog()
@@ -49,8 +73,13 @@ final class SpeciesCatalog: ObservableObject {
     let regions: [Region]
     let priorFactor: Double
     let modelVersion: String
+    let countryProfiles: [CountryProfile]
     private let byKey: [String: SpeciesClass]
     private let byName: [String: SpeciesClass]
+
+    private static let airSpecies: Set<String> = ["sekretaer", "hornrabe", "gelbschnabeltoko", "riesentrappe", "gaukler", "schreiseeadler", "weissrueckengeier", "gabelracke", "helmperlhuhn", "nilgans", "hammerkopf", "sattelstorch", "marabu", "flamingo"]
+    private static let airOnlySpecies: Set<String> = ["gaukler", "schreiseeadler", "weissrueckengeier", "gabelracke"]
+    private static let waterSpecies: Set<String> = ["flusspferd", "seebaer", "brillenpinguin", "nilgans", "hammerkopf", "sattelstorch", "marabu", "flamingo", "schreiseeadler", "nilkrokodil", "nilwaran"]
 
     init() {
         func load<T: Decodable>(_ name: String, as type: T.Type) -> T? {
@@ -70,6 +99,7 @@ final class SpeciesCatalog: ObservableObject {
         let r = load("regions", as: RegionsFile.self)
         regions = r?.regions ?? []
         priorFactor = r?.factor ?? 0.25
+        countryProfiles = load("country-profiles", as: CountryProfilesFile.self)?.profiles ?? []
         byKey = Dictionary(uniqueKeysWithValues: classes.map { ($0.key, $0) })
         byName = Dictionary(classes.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
     }
@@ -77,6 +107,19 @@ final class SpeciesCatalog: ObservableObject {
     func cls(key: String) -> SpeciesClass? { byKey[key] }
     func cls(name: String) -> SpeciesClass? { byName[name] }
     var shownClasses: [SpeciesClass] { classes.filter { !$0.negative } }
+    func country(_ code: String) -> CountryProfile? { countryProfiles.first { $0.code == code } }
+    func featuredClasses(for code: String) -> [SpeciesClass] {
+        guard let profile = country(code) else { return [] }
+        let keys = Set(profile.featured)
+        return shownClasses.filter { keys.contains($0.key) }
+    }
+    func habitats(for key: String) -> [AnimalHabitat] {
+        var result: [AnimalHabitat] = []
+        if !Self.airOnlySpecies.contains(key) { result.append(.ground) }
+        if Self.airSpecies.contains(key) { result.append(.air) }
+        if Self.waterSpecies.contains(key) { result.append(.water) }
+        return result
+    }
 
     /// Artenschutz: Nashörner (Klasse oder Sammelname)
     func isSensitive(name: String) -> Bool {
@@ -90,11 +133,19 @@ final class SpeciesCatalog: ObservableObject {
     }
 
     /// Dämpft Arten, die in der Region nicht vorkommen (nie auf null, damit klare Bilder gewinnen)
-    func applyPrior(_ probs: [Double], region: Region?) -> [Double] {
-        guard let r = region else { return probs }
-        let bad = Set(r.unlikely)
+    func applyPrior(_ probs: [Double], region: Region?, originCode: String? = nil, destinationCode: String? = nil) -> [Double] {
+        guard probs.count == classes.count else { return probs }
+        let bad = Set(region?.unlikely ?? [])
+        let origin = Set(originCode.flatMap { country($0)?.featured } ?? [])
+        let destination = Set(destinationCode.flatMap { country($0)?.featured } ?? [])
+        guard !bad.isEmpty || !origin.isEmpty || !destination.isEmpty else { return probs }
         var out = probs
         for (i, c) in classes.enumerated() where bad.contains(c.key) { out[i] *= priorFactor }
+        // Beide Länder sind nur schwaches Vorwissen; andere Arten bleiben immer erkennbar.
+        for (i, c) in classes.enumerated() {
+            if destination.contains(c.key) { out[i] *= 1.25 }
+            else if origin.contains(c.key) { out[i] *= 1.15 }
+        }
         let sum = out.reduce(0, +)
         return sum > 0 ? out.map { $0 / sum } : probs
     }
