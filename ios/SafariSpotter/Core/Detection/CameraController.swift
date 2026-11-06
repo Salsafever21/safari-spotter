@@ -388,9 +388,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         guard ClipFiles.hasRoom(available: ClipFiles.availableCapacity(at: directory), minimum: ClipFiles.minimumFreeToStart) else {
             lastError = "Zu wenig freier Speicher für ein Video (mindestens 1 GB)."; return
         }
-        let position = drive.lastFix.flatMap { fix in
-            Date().timeIntervalSince(fix.timestamp) < 180 ? Position.coarsen(lat: fix.coordinate.latitude, lon: fix.coordinate.longitude) : nil
-        }
+        let position = drive.currentPosition(sensitive: true)
         let now = Date()
         let info = VideoRecorder.StartInfo(createdAt: now, directory: directory, burnIn: settings.burnIn, labels: settings.labels,
                                            position: position, lens: lenses.first { $0.id == selectedLensID }?.name,
@@ -610,7 +608,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             self.lastLoggedSpecies = (name, .now, existing.id); return existing.id
         }
         let sensitive = self.catalog.isSensitive(name: name)
-        let pos = self.drive.lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < 180 ? Position.from($0, sensitive: sensitive) : nil }
+        let pos = self.drive.currentPosition(sensitive: sensitive)
         let s = Sighting(name: name, key: key, n: count, position: pos, thumb: thumb, src: src)
         ctx.insert(s)
         do { try saveContext(ctx) }
@@ -647,7 +645,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                                            name: $0.name, conf: $0.conf, sure: $0.sure) }
         // Artenschutz: das Foto wird ungenau, sobald irgendein Tier im Bild sensibel ist, nicht nur das gerade geloggte
         let sensitive = LocationProtection.containsSensitive(names.map { $0 as String? } + dets.map { $0.name }, isSensitive: { self.catalog.isSensitive(name: $0) })
-        let pos = drive.lastFix.map { Position.from($0, sensitive: sensitive) }
+        let pos = drive.currentPosition(sensitive: sensitive)
         let side = min(scaled.extent.width, scaled.extent.height)
         let thumb = pipeline.jpeg(scaled, rect: CGRect(x: (scaled.extent.width - side) / 2, y: (scaled.extent.height - side) / 2, width: side, height: side), size: 160, quality: 0.7)
         do {

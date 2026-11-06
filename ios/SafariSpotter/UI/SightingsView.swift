@@ -8,6 +8,7 @@ struct SightingsView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var catalog: SpeciesCatalog
     @EnvironmentObject private var drive: DriveRecorder
+    @EnvironmentObject private var settings: AppSettings
     @Query(sort: \Sighting.t, order: .reverse) private var sightings: [Sighting]
     @Query(sort: \PhotoItem.t, order: .reverse) private var photos: [PhotoItem]
     @Query(sort: \Drive.startedAt, order: .reverse) private var drives: [Drive]
@@ -142,7 +143,7 @@ struct SightingsView: View {
                     ForEach(sightings.filter { $0.coordinate != nil && $0.coarse }) { s in
                         MapCircle(center: s.coordinate!, radius: 10000).foregroundStyle(Color.red.opacity(0.08)).stroke(Color.red, lineWidth: 1.5)
                     }
-                    if let f = drive.lastFix { Annotation("", coordinate: f.coordinate) { Circle().fill(Color.cyan).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2)) } }
+                    if settings.gps, let f = drive.lastFix { Annotation("", coordinate: f.coordinate) { Circle().fill(Color.cyan).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2)) } }
                 }.frame(height: 320)
                 Text("Nashorn-Sichtungen erscheinen als 10-km-Kreis, ihre Fotos mit rotem Rand.").font(.caption).foregroundStyle(.secondary)
             }

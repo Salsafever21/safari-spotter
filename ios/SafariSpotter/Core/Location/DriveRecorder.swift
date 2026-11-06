@@ -91,17 +91,24 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func start() {
+        guard AppSettings.shared.gps else { stop(); return }
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
     }
-    func stop() { manager.stopUpdatingLocation() }
+    func stop() {
+        manager.stopUpdatingLocation()
+        lastFix = nil
+        autoRegion = nil
+    }
 
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
         authorization = m.authorizationStatus
+        guard AppSettings.shared.gps else { stop(); return }
         if authorization == .authorizedWhenInUse || authorization == .authorizedAlways { m.startUpdatingLocation() }
     }
 
     func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard AppSettings.shared.gps else { return }
         let valid = locations.filter { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }
             .sorted { $0.timestamp < $1.timestamp }
         guard let newest = valid.last else { return }
@@ -119,13 +126,20 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     /// Region für das Vorwissen (Einstellung "auto" | "none" | key)
     func currentRegion(setting: String) -> Region? {
         if setting == "none" { return nil }
-        if setting == "auto" { return autoRegion }
+        if setting == "auto" { return AppSettings.shared.gps ? autoRegion : nil }
         return catalog.regions.first { $0.key == setting }
+    }
+
+    func currentPosition(sensitive: Bool) -> Position? {
+        guard AppSettings.shared.gps, let lastFix,
+              abs(Date().timeIntervalSince(lastFix.timestamp)) < 180 else { return nil }
+        return Position.from(lastFix, sensitive: sensitive)
     }
 
     // MARK: Game Drive
 
     func startDrive() {
+        AppSettings.shared.gps = true
         active = true; startedAt = .now; points = []; dist = 0
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true

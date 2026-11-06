@@ -37,8 +37,12 @@ Versuch an, statt abzustürzen. Dabei wird der bestehende Datenspeicher nicht er
 Die Zoomsteuerung ändert das Kameraobjektiv nur nach erfolgreichem Sperren der Gerätekonfiguration; Fehler erscheinen
 als Meldung, statt eine ungesperrte Einstellung zu versuchen.
 Bei Game Drives werden auch gebündelte GPS-Updates vollständig in Zeitfolge übernommen. Jeder neue Stapel wird sofort
-atomar zwischengespeichert; ein Schreibfehler erscheint in der Fahrtansicht. Für diesen Stand bestanden 56 Logiktests
-und ein UI-Test im Simulator.
+atomar zwischengespeichert; ein Schreibfehler erscheint in der Fahrtansicht.
+Der GPS-Schalter aus der Web-App ist in den iOS-Einstellungen verfügbar. Ist er aus, stoppt die App die Standortupdates,
+verwirft den letzten Fix und ergänzt neue Kamera-Sichtungen, Schnappschüsse und Videos nicht mit aktuellem GPS. Ein Game
+Drive schaltet GPS beim Start ein; während einer aktiven Fahrt kann es erst nach dem Beenden ausgeschaltet werden.
+Standortdaten, die bereits im importierten Foto stehen, bleiben unabhängig davon erhalten. Der Import einer Sicherung
+wartet auf das Ende eines Game Drives oder einer Videoaufnahme. Für diesen Stand bestanden 57 Logiktests und ein UI-Test.
 
 ## Bauen
 

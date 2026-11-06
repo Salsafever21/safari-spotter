@@ -86,4 +86,27 @@ final class DrivePersistenceTests: StoreTestCase {
         XCTAssertEqual(recorder.points.count, 3)
         XCTAssertEqual(recorder.lastFix?.timestamp, third.timestamp)
     }
+
+    func testGPSOffClearsFixAndBlocksNewLocationData() {
+        let original = AppSettings.shared.gps
+        defer { AppSettings.shared.gps = original }
+        let (recorder, _) = makeRecorder()
+        let now = Date()
+        let fix = CLLocation(coordinate: CLLocationCoordinate2D(latitude: -24.9, longitude: 31.5),
+                             altitude: 300, horizontalAccuracy: 5, verticalAccuracy: 5,
+                             course: 0, speed: 4, timestamp: now)
+        AppSettings.shared.gps = true
+        recorder.lastFix = fix
+        XCTAssertNotNil(recorder.currentPosition(sensitive: false))
+
+        AppSettings.shared.gps = false
+        XCTAssertNil(recorder.currentPosition(sensitive: false))
+        recorder.start()
+        XCTAssertNil(recorder.lastFix)
+        recorder.active = true
+        recorder.startedAt = now.addingTimeInterval(-1)
+        recorder.locationManager(CLLocationManager(), didUpdateLocations: [fix])
+        XCTAssertTrue(recorder.points.isEmpty)
+        XCTAssertNil(recorder.lastFix)
+    }
 }

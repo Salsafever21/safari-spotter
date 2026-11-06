@@ -168,6 +168,12 @@ struct SettingsView: View {
     @State private var unlockingProtectedBackup = false
     @State private var pendingEncryptedURL: URL?
     @State private var backupBusy = false
+    private var importBlocked: Bool {
+        backupBusy || drive.active || camera.recordingStarting || camera.recording || camera.recordingFinishing
+    }
+    private var importBlockMessage: String {
+        "Bitte zuerst den Game Drive oder die Videoaufnahme beenden und vollständig speichern lassen."
+    }
     var body: some View {
         NavigationStack {
             Form {
@@ -181,6 +187,16 @@ struct SettingsView: View {
                     Toggle("Schnappschuss bei Sichtung", isOn: $settings.snapshots)
                     Toggle("Unsichere Treffer sammeln", isOn: $settings.collect)
                 }
+                Section("Standort") {
+                    Toggle("GPS verwenden", isOn: $settings.gps)
+                        .disabled(drive.active && settings.gps)
+                    if drive.active {
+                        Text("Beende den Game Drive, um GPS auszuschalten.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Ohne GPS erhalten neue Kamera-Sichtungen, Schnappschüsse und Videos keinen aktuellen Standort. Ein bereits im importierten Foto gespeicherter Standort bleibt nutzbar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Kamera") { Picker("Auflösung", selection: $settings.res) { Text("HD 720p").tag("720"); Text("Full HD 1080p").tag("1080"); Text("4K 2160p").tag("2160") }; Text("Gilt ab dem nächsten App-Start.").font(.caption).foregroundStyle(.secondary) }
                 Section("Video") {
                     Toggle("Rahmen ins Video einbrennen", isOn: $settings.burnIn).disabled(camera.recording)
@@ -189,9 +205,13 @@ struct SettingsView: View {
                 }
                 Section("Bisherige Web-App-Daten") {
                     Button("Sicherungsdatei importieren") { choosingBackup = true }
-                        .disabled(backupBusy)
+                        .disabled(importBlocked)
                     if pendingEncryptedURL != nil {
                         Button("Passwort erneut eingeben") { unlockingProtectedBackup = true }
+                            .disabled(importBlocked)
+                    }
+                    if drive.active || camera.recordingStarting || camera.recording || camera.recordingFinishing {
+                        Text(importBlockMessage).font(.caption).foregroundStyle(.secondary)
                     }
                     if let backupMessage { Text(backupMessage).font(.caption).foregroundStyle(.secondary) }
                     Text("Die Originaldatei bleibt in der App erhalten. Ein erneuter Import legt keine doppelten Einträge an.")
@@ -284,6 +304,10 @@ struct SettingsView: View {
     }
 
     private func importSelectedBackup(_ url: URL) throws {
+        guard !importBlocked else {
+            throw NSError(domain: "SafariSpotter.Import", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: importBlockMessage])
+        }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         if try EncryptedBackup.isEncrypted(url) {
@@ -309,6 +333,7 @@ struct SettingsView: View {
 
     private func restoreProtectedBackup(_ password: String) {
         guard let encrypted = pendingEncryptedURL else { return }
+        guard !importBlocked else { backupMessage = importBlockMessage; return }
         backupBusy = true
         backupMessage = "Sicherung wird geprüft und importiert …"
         Task {
@@ -515,12 +540,12 @@ struct PhotoAnalysisView: View {
         for (name, (n, key)) in counts {
             names.append(name)
             let sensitive = catalog.isSensitive(name: name)
-            let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) } ?? drive.lastFix.map { Position.from($0, sensitive: sensitive) }
+            let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) } ?? drive.currentPosition(sensitive: sensitive)
             let s = Sighting(name: name, key: key, t: r.meta.date ?? .now, n: n, position: pos, thumb: nil, src: "photo"); context.insert(s); ids.append(s.id)
         }
         let sensitive = names.contains { catalog.isSensitive(name: $0) }
         let pos: Position? = r.meta.coord.map { sensitive ? Position.coarsen(lat: $0.latitude, lon: $0.longitude) : Position(lat: $0.latitude, lon: $0.longitude, acc: 15, coarse: false) }
-            ?? (initialPhoto == nil ? nil : drive.lastFix.map { Position.from($0, sensitive: sensitive) })
+            ?? (initialPhoto == nil ? nil : drive.currentPosition(sensitive: sensitive))
         if let initialPhoto {
             initialPhoto.species = names
             initialPhoto.detsJSON = encodedDets

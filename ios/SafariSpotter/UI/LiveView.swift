@@ -66,6 +66,9 @@ struct LiveView: View {
         .onChange(of: drive.persistenceError) { _, warning in
             if let warning, !showDrive { camera.lastError = warning }
         }
+        .onChange(of: settings.gps) { _, enabled in
+            if enabled { drive.start() } else { drive.stop() }
+        }
         .sheet(isPresented: $showSightings) { SightingsView(camera: camera).environmentObject(catalog).environmentObject(drive) }
         .sheet(isPresented: $showSettings) { SettingsView(camera: camera) }
         .sheet(isPresented: $showDrive) { DriveLiveView(sightings: sightings) }
