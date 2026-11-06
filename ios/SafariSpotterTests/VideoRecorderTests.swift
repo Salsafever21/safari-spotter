@@ -260,6 +260,22 @@ final class VideoRecorderTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: ClipFiles.movieURL(garbage, in: dir).path), "nichts wird automatisch gelöscht")
     }
 
+    func testCorruptMetadataDoesNotHideMovieOrDestroyOriginal() async throws {
+        let id = UUID()
+        let corrupt = Data("unlesbare Original-Metadaten".utf8)
+        try corrupt.write(to: ClipFiles.metadataURL(id, in: dir))
+        try Data("Videodatei".utf8).write(to: ClipFiles.movieURL(id, in: dir))
+
+        XCTAssertEqual(ClipFiles.orphanMovies(in: dir), [id])
+        let report = await ClipFiles.recoverInterrupted(in: dir) { _ in
+            ClipProbe(duration: 2, width: 320, height: 240)
+        }
+        XCTAssertTrue(report.failedIDs.isEmpty)
+        XCTAssertEqual(report.changed.map(\.id), [id])
+        XCTAssertEqual(ClipFiles.load(id, in: dir)?.state, .recovered)
+        XCTAssertEqual(try Data(contentsOf: dir.appendingPathComponent(id.uuidString + ".json.unreadable")), corrupt)
+    }
+
     func testSlowDetectionNeverCostsVideoFrames() async throws {
         let recorder = VideoRecorder()
         recorder.start(info())

@@ -45,7 +45,10 @@ struct LiveView: View {
             UIApplication.shared.isIdleTimerDisabled = true
         }
         // Clips, die beim letzten Beenden der App noch aufgenommen wurden, prüfen und wieder in die Galerie holen
-        .task { await ClipLibrary.shared.recoverInterrupted(excluding: camera.activeClipID) }
+        .task {
+            await ClipLibrary.shared.recoverInterrupted(excluding: camera.activeClipID)
+            if let warning = ClipLibrary.shared.recoveryError { camera.lastError = warning }
+        }
         // Meldung nach dem Speichern eines Videos nach 3 s ausblenden
         .task(id: camera.notice) {
             guard camera.notice != nil else { return }

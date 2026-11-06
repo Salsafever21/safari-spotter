@@ -258,8 +258,7 @@ struct SettingsView: View {
             return
         }
         backupBusy = true
-        if let previous = nativeBackupURL { try? FileManager.default.removeItem(at: previous) }
-        nativeBackupURL = nil
+        let previous = nativeBackupURL
         backupMessage = "Sicherung wird erstellt …"
         Task {
             do {
@@ -271,8 +270,11 @@ struct SettingsView: View {
                     return try EncryptedBackup.encrypt(bundle, password: password)
                 }.value
                 nativeBackupURL = protected
+                if let previous { try? FileManager.default.removeItem(at: previous) }
                 backupMessage = "Verschlüsselte Sicherung bereit. Jetzt über „Sicherungsdatei teilen“ in Dateien sichern."
-            } catch { backupMessage = error.localizedDescription }
+            } catch {
+                backupMessage = error.localizedDescription + (previous == nil ? "" : " Die bisherige Sicherungsdatei bleibt verfügbar.")
+            }
             backupBusy = false
         }
     }

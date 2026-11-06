@@ -145,8 +145,9 @@ enum NativeArchive {
 
     private static func validClipName(_ name: String) -> Bool {
         let parts = name.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count == 2 && UUID(uuidString: String(parts[0])) != nil
-            && ["mov", "jpg", "json"].contains(parts[1])
+        guard let first = parts.first, UUID(uuidString: String(first)) != nil else { return false }
+        return (parts.count == 2 && ["mov", "jpg", "json"].contains(parts[1]))
+            || (parts.count == 3 && parts[1] == "json" && parts[2] == "unreadable")
     }
 
     private static func entry(for url: URL, name: String) throws -> Entry {

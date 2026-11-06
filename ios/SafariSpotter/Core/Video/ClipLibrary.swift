@@ -11,8 +11,10 @@ final class ClipLibrary: ObservableObject {
     static let shared = ClipLibrary()
 
     @Published private(set) var clips: [ClipRecord] = []
+    @Published private(set) var recoveryError: String?
     let directory: URL?
     private var recoveryDone = false
+    private var recoveryInProgress = false
 
     init(directory: URL? = try? ClipFiles.defaultDirectory()) {
         self.directory = directory
@@ -40,10 +42,15 @@ final class ClipLibrary: ObservableObject {
     }
 
     /// Einmal nach dem Start: Aufnahmen, die beim Beenden der App noch liefen, prüfen und als wiederhergestellt markieren
+    @MainActor
     func recoverInterrupted(excluding active: UUID?) async {
-        guard !recoveryDone, let directory else { return }
-        recoveryDone = true
-        await ClipFiles.recoverInterrupted(in: directory, excluding: active, probe: Self.probe)
+        guard !recoveryDone, !recoveryInProgress, let directory else { return }
+        recoveryInProgress = true
+        defer { recoveryInProgress = false }
+        let report = await ClipFiles.recoverInterrupted(in: directory, excluding: active, probe: Self.probe)
+        guard !Task.isCancelled else { return }
+        recoveryDone = report.failedIDs.isEmpty
+        recoveryError = report.failedIDs.isEmpty ? nil : "\(report.failedIDs.count) Videoaufnahme(n) konnten nicht wiederhergestellt werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht."
         reload()
     }
 

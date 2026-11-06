@@ -13,8 +13,10 @@ final class NativeArchiveTests: XCTestCase {
         try coreBytes.write(to: core)
         let id = UUID().uuidString
         let metadata = Data("{\"id\":\"\(id)\"}".utf8)
+        let originalMetadata = Data("unlesbare Metadaten".utf8)
         let video = Data((0..<2_100_000).map { UInt8(truncatingIfNeeded: $0) })
         try metadata.write(to: clips.appendingPathComponent("\(id).json"))
+        try originalMetadata.write(to: clips.appendingPathComponent("\(id).json.unreadable"))
         try video.write(to: clips.appendingPathComponent("\(id).mov"))
 
         let archive = try NativeArchive.create(core: core, clipsDirectory: clips)
@@ -22,11 +24,12 @@ final class NativeArchiveTests: XCTestCase {
         let extracted = try NativeArchive.extract(archive)
         defer { extracted.removeTemporaryFiles() }
         XCTAssertEqual(try Data(contentsOf: extracted.core), coreBytes)
-        XCTAssertEqual(extracted.clips.count, 2)
+        XCTAssertEqual(extracted.clips.count, 3)
         try NativeArchive.installClips(extracted, clipsDirectory: restored)
         try NativeArchive.installClips(extracted, clipsDirectory: restored)
         XCTAssertEqual(try Data(contentsOf: restored.appendingPathComponent("\(id).mov")), video)
         XCTAssertEqual(try Data(contentsOf: restored.appendingPathComponent("\(id).json")), metadata)
+        XCTAssertEqual(try Data(contentsOf: restored.appendingPathComponent("\(id).json.unreadable")), originalMetadata)
     }
 
     func testDamagedClipIsRejectedBeforeRestore() throws {

@@ -59,6 +59,11 @@ struct ClipProbe: Equatable {
     var height: Int
 }
 
+struct ClipRecoveryReport {
+    var changed: [ClipRecord] = []
+    var failedIDs: [UUID] = []
+}
+
 enum ClipFileError: LocalizedError, Equatable {
     case invalidRecord(String)
     case missingMovie
@@ -128,12 +133,12 @@ enum ClipFiles {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    /// Videodateien ohne Metadaten (Abbruch vor dem ersten Schreiben der JSON-Datei)
+    /// Videodateien ohne lesbare Metadaten (Abbruch oder beschädigte JSON-Datei)
     static func orphanMovies(in dir: URL) -> [UUID] {
         let names = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
         return names.filter { $0.hasSuffix(".mov") }
             .compactMap { UUID(uuidString: String($0.dropLast(4))) }
-            .filter { !names.contains(metadataName($0)) }
+            .filter { id in load(id, in: dir)?.id != id }
             .sorted { $0.uuidString < $1.uuidString }
     }
 
@@ -142,17 +147,19 @@ enum ClipFiles {
     }
 
     /// Nach einem Abbruch (App beendet, Absturz): Clips im Zustand `recording` und Videos ohne Metadaten prüfen und als
-    /// `recovered` (abspielbar) oder `damaged` markieren. Löscht nichts. `excluding` ist eine gerade laufende Aufnahme.
+    /// `recovered` (abspielbar) oder `damaged` markieren. Unlesbare JSON-Dateien bleiben als `.json.unreadable` erhalten.
+    /// `excluding` ist eine gerade laufende Aufnahme.
     @discardableResult
-    static func recoverInterrupted(in dir: URL, excluding active: UUID? = nil, probe: (URL) async -> ClipProbe?) async -> [ClipRecord] {
-        var changed: [ClipRecord] = []
+    static func recoverInterrupted(in dir: URL, excluding active: UUID? = nil, probe: (URL) async -> ClipProbe?) async -> ClipRecoveryReport {
+        var report = ClipRecoveryReport()
         for var r in list(in: dir) where r.state == .recording && r.id != active {
             let url = movieURL(r.id, in: dir)
             if let p = await probe(url), p.duration > 0 {
                 r.state = .recovered; r.duration = p.duration; r.width = p.width; r.height = p.height
             } else { r.state = .damaged }
             r.fileSize = fileSize(url)
-            if (try? save(r, in: dir)) != nil { changed.append(r) }
+            do { try save(r, in: dir); report.changed.append(r) }
+            catch { report.failedIDs.append(r.id) }
         }
         for id in orphanMovies(in: dir) where id != active {
             let url = movieURL(id, in: dir)
@@ -160,9 +167,20 @@ enum ClipFiles {
             var r = ClipRecord(id: id, createdAt: created, burnedIn: false, trackingActive: false, state: .damaged)
             if let p = await probe(url), p.duration > 0 { r.state = .recovered; r.duration = p.duration; r.width = p.width; r.height = p.height }
             r.fileSize = fileSize(url)
-            if (try? save(r, in: dir)) != nil { changed.append(r) }
+            do {
+                let metadata = metadataURL(id, in: dir)
+                if FileManager.default.fileExists(atPath: metadata.path) {
+                    // Nicht überschreiben, ohne das unlesbare Original aufzubewahren.
+                    let preserved = dir.appendingPathComponent(id.uuidString + ".json.unreadable")
+                    if !FileManager.default.fileExists(atPath: preserved.path) {
+                        try FileManager.default.copyItem(at: metadata, to: preserved)
+                    }
+                }
+                try save(r, in: dir)
+                report.changed.append(r)
+            } catch { report.failedIDs.append(id) }
         }
-        return changed
+        return report
     }
 
     /// Clip vollständig löschen (Video, Metadaten, Vorschaubild); nur auf ausdrücklichen Wunsch aus der Galerie
