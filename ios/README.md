@@ -3,7 +3,8 @@
 Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberfläche und SwiftData-Speicher. Die Regeln für
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
-Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 ist für die interne TestFlight-Gruppe vorbereitet;
+Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
+die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus.
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.
