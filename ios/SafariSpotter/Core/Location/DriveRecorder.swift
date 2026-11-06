@@ -63,6 +63,7 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     @Published var points: [TrackPoint] = []
     @Published var dist = 0.0
     @Published var authorization: CLAuthorizationStatus = .notDetermined
+    @Published private(set) var persistenceError: String?
 
     private let manager = CLLocationManager()
     private let catalog = SpeciesCatalog.shared
@@ -112,14 +113,17 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
         start(); persist()
     }
 
-    /// Beendet den Drive und gibt den fertigen Datensatz zurück (der Aufrufer speichert ihn in SwiftData)
-    func stopDrive(sightingsCount: Int) -> Drive? {
+    /// Erst einen Datensatz vorbereiten; die laufende Route bleibt erhalten, bis SwiftData ihn bestätigt hat.
+    func preparedDrive(sightingsCount: Int) -> Drive? {
         guard active, let s = startedAt else { return nil }
-        let d = Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+        return Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+    }
+
+    func finishDrive() {
+        guard active else { return }
         active = false; startedAt = nil; points = []; dist = 0
         manager.allowsBackgroundLocationUpdates = false
         persist()
-        return d
     }
 
     private func addPoint(_ loc: CLLocation) {
@@ -144,8 +148,14 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     private var stateURL: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("drive-state.json") }
     private struct State: Codable { var active: Bool; var startedAt: Date?; var points: [TrackPoint]; var dist: Double }
     private func persist() {
-        try? FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(State(active: active, startedAt: startedAt, points: points, dist: dist)).write(to: stateURL)
+        do {
+            try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(State(active: active, startedAt: startedAt, points: points, dist: dist))
+                .write(to: stateURL, options: .atomic)
+            persistenceError = nil
+        } catch {
+            persistenceError = "Game Drive konnte nicht zwischengespeichert werden: \(error.localizedDescription)"
+        }
     }
     private func restore() {
         guard let data = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode(State.self, from: data), s.active else { return }

@@ -584,8 +584,12 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
                            count: Int, noMerge: Bool, generation: Int? = nil, detections: [PhotoDet] = []) -> UUID? {
         if let generation, (!tracking || generation != displayGeneration) { return nil }
         guard let ctx = self.modelContext else { return nil }
-        if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30,
-           let existing = SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) {
+        var existingToMerge: Sighting?
+        if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30 {
+            do { existingToMerge = try SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) }
+            catch { lastError = "Sichtung konnte nicht gelesen werden: \(error.localizedDescription)"; return nil }
+        }
+        if let existing = existingToMerge {
             let oldCount = existing.n, oldTime = existing.t, oldThumb = existing.thumb
             existing.n += count; existing.t = .now; if existing.thumb == nil { existing.thumb = thumb }
             do { try saveContext(ctx) }
@@ -673,17 +677,25 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     func correct(trackId: Int, name: String, key: String, isNone: Bool, isOther: Bool) {
         queue.async {
             guard let t = self.tracker.track(id: trackId) else { return }
-            t.locked = true; t.logged = true
             let existing = t.sightingId
-            if isNone { self.tracker.remove(id: trackId) }
-            else { t.decision = SpeciesDecision(name: name, key: key, confidence: 1, sure: !isOther, other: isOther) }
             DispatchQueue.main.async {
                 guard let ctx = self.modelContext else { return }
-                let id = SightingStore(context: ctx, catalog: self.catalog).applyTrackCorrection(existingId: existing, name: name, key: key, isNone: isNone, isOther: isOther) {
-                    self.logOnMain(name: name, key: key, thumb: nil, src: "cam", image: nil, size: .zero, count: 1, noMerge: true)
+                do {
+                    let id = try SightingStore(context: ctx, catalog: self.catalog).applyTrackCorrection(
+                        existingId: existing, name: name, key: key, isNone: isNone, isOther: isOther) {
+                            self.logOnMain(name: name, key: key, thumb: nil, src: "cam", image: nil, size: .zero,
+                                           count: 1, noMerge: true)
+                        }
+                    if let existing { self.noteSightingChanged(existing) }
+                    self.queue.async {
+                        t.locked = true; t.logged = true
+                        if isNone { self.tracker.remove(id: trackId) }
+                        else { t.decision = SpeciesDecision(name: name, key: key, confidence: 1, sure: !isOther, other: isOther) }
+                        t.sightingId = id
+                    }
+                } catch {
+                    self.lastError = "Korrektur konnte nicht gespeichert werden: \(error.localizedDescription)"
                 }
-                if let existing { self.noteSightingChanged(existing) }
-                self.queue.async { t.sightingId = id }
             }
         }
     }
@@ -692,8 +704,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     /// oder gelöschte Sichtung weiterzählen.
     func noteSightingChanged(_ id: UUID) {
         guard let last = lastLoggedSpecies, last.id == id, let ctx = modelContext else { return }
-        if let s = SightingStore(context: ctx, catalog: catalog).sighting(id: id) { lastLoggedSpecies = (s.name, last.t, id) }
-        else { lastLoggedSpecies = nil }
+        do {
+            if let s = try SightingStore(context: ctx, catalog: catalog).sighting(id: id) {
+                lastLoggedSpecies = (s.name, last.t, id)
+            } else { lastLoggedSpecies = nil }
+        } catch {
+            lastLoggedSpecies = nil
+            lastError = "Sichtung konnte nicht gelesen werden: \(error.localizedDescription)"
+        }
     }
 
     func track(at point: CGPoint, slack: CGFloat) -> TrackSnapshot? {

@@ -4,7 +4,8 @@ Dieser Ordner enthält die native iOS-App mit Core-ML-Modellen, SwiftUI-Oberflä
 Erkennung, Game Drives und Artenschutz wurden aus der Web-App (`index.html`, `app.js`) übernommen.
 
 Stand 6. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 7 wurde zu App Store Connect hochgeladen;
-die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus.
+die Zuweisung zur internen TestFlight-Gruppe steht nach Apples Verarbeitung und erneuter Anmeldung noch aus. Build 8
+enthält weitere Datenschutz- und Speicherverbesserungen; die TestFlight-Bereitstellung folgt nach Sandros Rückkehr.
 Sandro hat auf dem iPhone bestätigt, dass der Fix für stehenbleibende Erkennungsrahmen funktioniert. Die Web-App kann eine
 vollständige `.ssbackup`-Datei erzeugen. Die iOS-App kann diese importieren sowie ihre eigenen Sichtungen, Fotos,
 Videoclips, Korrekturen, Fahrten und alle App-Einstellungen passwortgeschützt exportieren und wiederherstellen.
@@ -13,9 +14,13 @@ Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto w
 App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
 Build 4 verhindert, dass ein verspätetes Erkennungsergebnis nach dem Ausschalten des Trackings Status oder Rahmen erneut
 einblendet. Beim Ausschalten werden die sichtbaren Treffer sofort entfernt; Ergebnisse des vorherigen Laufs werden verworfen.
-Nach Build 7 prüft die Kamera-Speicherung Commit-Fehler: fehlgeschlagene Sichtungen gelten nicht als erfasst, der Track kann
+In Build 8 prüft die Kamera-Speicherung Commit-Fehler: fehlgeschlagene Sichtungen gelten nicht als erfasst, der Track kann
 nach einer kurzen Pause erneut gespeichert werden, und Speicherausfälle für Schnappschüsse und Prüfliste werden angezeigt.
 Die Fotomarkierungen werden vor dem Wechsel auf den Hauptthread kopiert, statt den Tracker gleichzeitig auszulesen.
+Manuelle Korrekturen brechen ab, wenn die verknüpften Fotos nicht gelesen oder die Änderungen nicht gespeichert werden
+können; das verhindert insbesondere eine ungeschützte Nashorn-Position nach einer halben Korrektur. Listen, Galerie und
+Prüfliste zeigen Speicherfehler an, statt sie zu verbergen. Ein Game Drive wird erst nach erfolgreichem Speichern beendet;
+die laufende Route wird atomar zwischengespeichert. Für diesen Stand bestanden 47 Simulator-Tests.
 
 ## Bauen
 

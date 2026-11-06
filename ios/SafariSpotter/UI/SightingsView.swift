@@ -17,6 +17,7 @@ struct SightingsView: View {
     @State private var correction: CorrectionTarget?
     @State private var viewer: PhotoItem?
     @State private var confirmClear = false
+    @State private var storageError: String?
     @ObservedObject private var clipLibrary = ClipLibrary.shared
 
     var body: some View {
@@ -40,11 +41,22 @@ struct SightingsView: View {
             .confirmationDialog("Alle Sichtungen aus allen Tagen löschen?", isPresented: $confirmClear) {
                 Button("Alle Sichtungen löschen", role: .destructive) {
                     sightings.forEach { context.delete($0) }
-                    try? context.save()
+                    commit("Sichtungen löschen")
                 }
             } message: {
                 Text("Sichere die Daten vorher in Einstellungen → Daten sichern.")
             }
+            .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
+                Button("OK") {}
+            } message: { Text(storageError ?? "") }
+        }
+    }
+
+    private func commit(_ action: String) {
+        do { try context.save() }
+        catch {
+            context.rollback()
+            storageError = "\(action) fehlgeschlagen: \(error.localizedDescription)"
         }
     }
 
@@ -63,7 +75,10 @@ struct SightingsView: View {
                         Text(s.lat == nil ? "ohne Standort" : s.coarse ? "Standort ±10 km (Artenschutz)" : "GPS ±\(Int(s.acc ?? 0)) m").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Stepper("\(s.n)", value: Binding(get: { s.n }, set: { v in if v <= 0 { context.delete(s) } else { s.n = v }; try? context.save() })).labelsHidden()
+                    Stepper("\(s.n)", value: Binding(get: { s.n }, set: { v in
+                        if v <= 0 { context.delete(s) } else { s.n = v }
+                        commit("Zählung speichern")
+                    })).labelsHidden()
                     Text("\(s.n)").monospacedDigit().frame(width: 28)
                     Text(fmtTime(s.t)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
@@ -161,6 +176,7 @@ struct GalleryView: View {
     @State private var viewer: PhotoItem?
     @State private var busy = false
     @State private var exportError: String?
+    @State private var confirmDelete = false
     @ObservedObject private var clipLibrary = ClipLibrary.shared
     var body: some View {
         ScrollView {
@@ -184,12 +200,19 @@ struct GalleryView: View {
                         catch { exportError = error.localizedDescription }
                     }
                 }.disabled(busy || photos.isEmpty)
-                Button("Alle löschen", role: .destructive) { photos.forEach { context.delete($0) }; try? context.save() }
+                Button("Alle löschen", role: .destructive) { confirmDelete = true }
             }.buttonStyle(.bordered).padding()
             Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. In der Fotos-App erscheinen sie auf der Orte-Karte. Nashorn-Fotos tragen nur den 10-km-Standort.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
         }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
-        .alert("Sichern fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
+        .confirmationDialog("Alle Fotos aus der App löschen?", isPresented: $confirmDelete) {
+            Button("Alle Fotos löschen", role: .destructive) {
+                photos.forEach { context.delete($0) }
+                do { try context.save() }
+                catch { context.rollback(); exportError = "Fotos konnten nicht gelöscht werden: \(error.localizedDescription)" }
+            }
+        } message: { Text("Sichere die Daten vorher in Einstellungen → Daten sichern.") }
+        .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
     }
 }
 
@@ -203,6 +226,7 @@ struct PhotoViewer: View {
     @State private var boxes = true
     @State private var saved = false
     @State private var exportError: String?
+    @State private var confirmDelete = false
     var current: PhotoItem { photos.indices.contains(index) ? photos[index] : photo }
     var body: some View {
         VStack {
@@ -229,12 +253,19 @@ struct PhotoViewer: View {
                     }
                 }.buttonStyle(.borderedProminent)
                 Button(boxes ? "Rahmen aus" : "Rahmen ein") { boxes.toggle() }.buttonStyle(.bordered)
-                Button("Löschen", role: .destructive) { context.delete(current); try? context.save(); dismiss() }.buttonStyle(.bordered)
+                Button("Löschen", role: .destructive) { confirmDelete = true }.buttonStyle(.bordered)
             }.padding()
         }
         .onAppear { index = photos.firstIndex { $0.id == photo.id } ?? 0 }
         .onChange(of: index) { saved = false }
-        .alert("Sichern fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
+        .confirmationDialog("Dieses Foto aus der App löschen?", isPresented: $confirmDelete) {
+            Button("Foto löschen", role: .destructive) {
+                context.delete(current)
+                do { try context.save(); dismiss() }
+                catch { context.rollback(); exportError = "Foto konnte nicht gelöscht werden: \(error.localizedDescription)" }
+            }
+        }
+        .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
     }
 }
 
@@ -245,6 +276,8 @@ struct ReviewView: View {
     @EnvironmentObject private var catalog: SpeciesCatalog
     @Query(filter: #Predicate<Correction> { $0.status != "review" }) private var done: [Correction]
     @State private var picking: Correction?
+    @State private var storageError: String?
+    @State private var confirmDeleteDone = false
     var body: some View {
         List {
             Text("Unsichere Erkennungen landen hier. Bestätigen oder korrigieren, dann exportieren: Daraus lernt das Modell deine Safari.").font(.caption).foregroundStyle(.secondary)
@@ -253,17 +286,29 @@ struct ReviewView: View {
                     if let ui = UIImage(data: c.image) { Image(uiImage: ui).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 10)) }
                     VStack(alignment: .leading) {
                         Text(c.predicted ?? "unbestimmt").bold(); Text("\(Int((c.conf ?? 0) * 100)) % · \(fmtTime(c.t))").font(.caption).foregroundStyle(.secondary)
-                        HStack { Button("Richtig") { c.status = "confirmed"; c.label = c.predicted; c.labelKey = c.predKey; try? context.save() }.tint(.green)
-                            Button("Falsch …") { picking = c }; Button("Löschen", role: .destructive) { context.delete(c); try? context.save() } }.buttonStyle(.bordered).font(.caption)
+                        HStack { Button("Richtig") { c.status = "confirmed"; c.label = c.predicted; c.labelKey = c.predKey; commit("Prüfung speichern") }.tint(.green)
+                            Button("Falsch …") { picking = c }; Button("Löschen", role: .destructive) { context.delete(c); commit("Prüfung löschen") } }.buttonStyle(.bordered).font(.caption)
                     }
                 }
             }
             Section {
                 if let url = exportURL { ShareLink(item: url) { Label("Korrekturen exportieren (\(done.count) geprüft)", systemImage: "square.and.arrow.up") } }
-                Button("Geprüfte löschen", role: .destructive) { done.forEach { context.delete($0) }; try? context.save() }
+                Button("Geprüfte löschen", role: .destructive) { confirmDeleteDone = true }
             }
         }
-        .sheet(item: $picking) { c in SpeciesPicker(predicted: c.predicted) { name, key in c.status = "corrected"; c.label = name; c.labelKey = key; try? context.save() } }
+        .sheet(item: $picking) { c in SpeciesPicker(predicted: c.predicted) { name, key in
+            c.status = "corrected"; c.label = name; c.labelKey = key; commit("Korrektur speichern")
+        } }
+        .confirmationDialog("Alle geprüften Einträge löschen?", isPresented: $confirmDeleteDone) {
+            Button("Geprüfte löschen", role: .destructive) { done.forEach { context.delete($0) }; commit("Geprüfte Einträge löschen") }
+        }
+        .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
+            Button("OK") {}
+        } message: { Text(storageError ?? "") }
+    }
+    private func commit(_ action: String) {
+        do { try context.save() }
+        catch { context.rollback(); storageError = "\(action) fehlgeschlagen: \(error.localizedDescription)" }
     }
     private var exportURL: URL? {
         // Explizite Typen: gemischte Dictionary-Literale ohne Typangabe kompilieren nicht. Fehlende Werte als null wie im Web.

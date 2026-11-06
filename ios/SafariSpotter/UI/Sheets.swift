@@ -42,20 +42,36 @@ struct CorrectionSheet: View {
         SpeciesPicker(predicted: target.predicted) { name, key in
             let isNone = key == "__none", isOther = key == "__other"
             let store = SightingStore(context: context, catalog: catalog)
-            if let sid = target.sightingId, let s = store.sighting(id: sid) {
-                // Korrektur aus der Liste: ganze Sichtung; bei Nashorn werden auch die verknüpften Fotos ungenau
-                if isNone { store.remove(s) } else { store.rename(s, to: name, key: key) }
-                camera.noteSightingChanged(sid)
+            if let sid = target.sightingId {
+                do {
+                    guard let s = try store.sighting(id: sid) else {
+                        camera.lastError = "Die Sichtung ist nicht mehr vorhanden."
+                        return
+                    }
+                    // Korrektur aus der Liste: ganze Sichtung; bei Nashorn werden auch die verknüpften Fotos ungenau
+                    if isNone { try store.remove(s) } else { try store.rename(s, to: name, key: key) }
+                    camera.noteSightingChanged(sid)
+                } catch {
+                    camera.lastError = "Korrektur konnte nicht gespeichert werden: \(error.localizedDescription)"
+                    return
+                }
             } else if let tid = target.trackId {
                 // Live-Rahmen: der CameraController benennt die schon geloggte Sichtung um (oder spaltet ab), statt eine zweite anzulegen
                 camera.correct(trackId: tid, name: name, key: key, isNone: isNone, isOther: isOther)
             } else if !isNone {
-                camera.log(name: name, key: key, thumb: nil, src: "manual", image: nil, size: .zero, noMerge: true)
+                guard camera.log(name: name, key: key, thumb: nil, src: "manual", image: nil, size: .zero, noMerge: true) != nil else { return }
             }
             if let img = target.thumb, let predicted = target.predicted {
-                context.insert(Correction(image: img, predicted: predicted, predKey: catalog.cls(name: predicted)?.key, conf: nil, label: name, labelKey: key, status: predicted == name ? "confirmed" : "corrected", region: drive.autoRegion?.key))
+                let correction = Correction(image: img, predicted: predicted, predKey: catalog.cls(name: predicted)?.key,
+                                            conf: nil, label: name, labelKey: key,
+                                            status: predicted == name ? "confirmed" : "corrected", region: drive.autoRegion?.key)
+                context.insert(correction)
+                do { try context.save() }
+                catch {
+                    context.delete(correction)
+                    camera.lastError = "Korrektur konnte nicht gespeichert werden: \(error.localizedDescription)"
+                }
             }
-            try? context.save()
         }
     }
 }
@@ -85,6 +101,7 @@ struct DriveLiveView: View {
     @State private var position: MapCameraPosition = .userLocation(fallback: .automatic)
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var tick = 0
+    @State private var saveError: String?
     var body: some View {
         let st = drive.stats(sightings: sightings)
         NavigationStack {
@@ -104,13 +121,27 @@ struct DriveLiveView: View {
                 }
                 Section {
                     Button("Game Drive beenden", role: .destructive) {
-                        if let d = drive.stopDrive(sightingsCount: sightings.filter { $0.t >= (drive.startedAt ?? .now) }.reduce(0) { $0 + $1.n }) { context.insert(d); try? context.save() }
-                        dismiss()
+                        guard let d = drive.preparedDrive(sightingsCount: sightings.filter {
+                            $0.t >= (drive.startedAt ?? .now)
+                        }.reduce(0) { $0 + $1.n }) else { return }
+                        context.insert(d)
+                        do {
+                            try context.save()
+                            drive.finishDrive()
+                            dismiss()
+                        } catch {
+                            context.delete(d)
+                            saveError = "Game Drive konnte nicht gespeichert werden: \(error.localizedDescription). Die Aufzeichnung läuft weiter."
+                        }
                     }
                 }
+                if let warning = drive.persistenceError { Text(warning).foregroundStyle(.orange) }
             }
             .navigationTitle("Game Drive").navigationBarTitleDisplayMode(.inline)
             .onReceive(timer) { _ in tick += 1 }
+            .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("OK") {}
+            } message: { Text(saveError ?? "") }
         }
     }
     private func big(_ v: String, _ l: String) -> some View { VStack(alignment: .leading) { Text(v).font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit()); Text(l).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading) }
