@@ -32,6 +32,8 @@ Videoaufnahme ihre ersten Metadaten nicht sichern, meldet die App den Schreibfeh
 werden nur gespeichert, wenn sämtliche Erkennungsmarkierungen kodiert werden können. Beim Import alter Web-Sicherungen
 führen beschädigte Fotomarkierungen oder GPS-Punkte zu einem Fehler und einem vollständigen Rollback, statt unbemerkt
 verloren zu gehen. Für diesen Stand bestanden 55 Logiktests und ein UI-Test mit zwei ausgewählten Fotos im Simulator.
+Falls SwiftData beim App-Start den lokalen Speicher nicht öffnen kann, zeigt die App nun den Fehler und einen erneuten
+Versuch an, statt abzustürzen. Dabei wird der bestehende Datenspeicher nicht ersetzt oder gelöscht.
 
 ## Bauen
 

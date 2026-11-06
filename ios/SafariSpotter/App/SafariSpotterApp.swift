@@ -4,13 +4,7 @@ import SwiftData
 @main
 struct SafariSpotterApp: App {
     // SwiftData-Container für Sichtungen, Fotos, Korrekturen und Game Drives
-    let container: ModelContainer = {
-        do {
-            return try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self)
-        } catch {
-            fatalError("SwiftData konnte nicht gestartet werden: \(error)")
-        }
-    }()
+    @State private var storage = StorageLaunch.open()
 
     @StateObject private var catalog = SpeciesCatalog.shared
     @StateObject private var drive = DriveRecorder.shared
@@ -18,13 +12,47 @@ struct SafariSpotterApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LiveView()
-                .environmentObject(catalog)
-                .environmentObject(drive)
-                .environmentObject(settings)
-                .preferredColorScheme(.dark)
+            Group {
+                switch storage {
+                case .ready(let container):
+                    LiveView()
+                        .environmentObject(catalog)
+                        .environmentObject(drive)
+                        .environmentObject(settings)
+                        .modelContainer(container)
+                case .failed(let message):
+                    StorageFailureView(message: message) { storage = StorageLaunch.open() }
+                }
+            }
+            .preferredColorScheme(.dark)
         }
-        .modelContainer(container)
+    }
+}
+
+private enum StorageLaunch {
+    case ready(ModelContainer)
+    case failed(String)
+
+    static func open() -> StorageLaunch {
+        do { return .ready(try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self)) }
+        catch { return .failed(error.localizedDescription) }
+    }
+}
+
+private struct StorageFailureView: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "externaldrive.badge.exclamationmark").font(.largeTitle)
+            Text("Gespeicherte Daten können nicht geöffnet werden").font(.headline).multilineTextAlignment(.center)
+            Text("Bitte Safari Spotter nicht löschen. Die App entfernt bei diesem Fehler keine Aufnahmen. Prüfe den freien Speicher und versuche es erneut.")
+                .multilineTextAlignment(.center)
+            Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Button("Erneut versuchen", action: retry).buttonStyle(.borderedProminent)
+        }
+        .padding(24)
     }
 }
 
