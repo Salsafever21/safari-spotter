@@ -642,12 +642,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let pos = drive.lastFix.map { Position.from($0, sensitive: sensitive) }
         let side = min(scaled.extent.width, scaled.extent.height)
         let thumb = pipeline.jpeg(scaled, rect: CGRect(x: (scaled.extent.width - side) / 2, y: (scaled.extent.height - side) / 2, width: side, height: side), size: 160, quality: 0.7)
-        let photo = PhotoItem(t: .now, kind: "auto", species: names, dets: dets, image: jpeg, thumb: thumb,
-                              width: Int(scaled.extent.width), height: Int(scaled.extent.height), position: pos, sightingIds: sightingIds)
-        ctx.insert(photo)
-        do { try saveContext(ctx) }
+        do {
+            let photo = try PhotoItem(t: .now, kind: "auto", species: names, dets: dets, image: jpeg, thumb: thumb,
+                                      width: Int(scaled.extent.width), height: Int(scaled.extent.height), position: pos, sightingIds: sightingIds)
+            ctx.insert(photo)
+            do { try saveContext(ctx) }
+            catch { ctx.delete(photo); throw error }
+        }
         catch {
-            ctx.delete(photo)
             lastError = "Schnappschuss konnte nicht gespeichert werden: \(error.localizedDescription)"
         }
     }

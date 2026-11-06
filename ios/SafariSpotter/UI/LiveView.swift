@@ -164,15 +164,15 @@ struct LiveView: View {
                     return
                 }
                 let thumb = image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7)
-                let item = PhotoItem(t: .now, kind: "cam", species: [], dets: [], image: data,
-                                     thumb: thumb, width: Int(image.size.width * image.scale),
-                                     height: Int(image.size.height * image.scale), position: nil, sightingIds: [])
-                context.insert(item)
                 do {
+                    let item = try PhotoItem(t: .now, kind: "cam", species: [], dets: [], image: data,
+                                             thumb: thumb, width: Int(image.size.width * image.scale),
+                                             height: Int(image.size.height * image.scale), position: nil, sightingIds: [])
+                    context.insert(item)
                     try context.save()
                     capturedPhoto = item
                 } catch {
-                    context.delete(item)
+                    context.rollback()
                     camera.lastError = "Foto konnte nicht gespeichert werden: \(error.localizedDescription)"
                 }
             }

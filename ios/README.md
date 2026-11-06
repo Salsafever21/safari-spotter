@@ -27,8 +27,11 @@ einem Fehler abbrechen, statt unbemerkt zu fehlen. Die Mediathek-Analyse verarbe
 nacheinander; jedes Bild wird einzeln gespeichert oder übersprungen. Lade- und Modellfehler werden angezeigt, und ein
 Speicherfehler lässt den aktuellen Schritt zur Wiederholung offen. Eine neue verschlüsselte Sicherung ersetzt die
 vorherige Datei erst nach erfolgreicher Erstellung. Eine Videodatei mit unlesbaren Metadaten wird beim Start geprüft;
-die ursprünglichen Metadaten bleiben für eine spätere Prüfung erhalten und werden mitgesichert. Für diesen Stand bestanden
-52 Logiktests und ein UI-Test mit zwei ausgewählten Fotos im Simulator.
+die ursprünglichen Metadaten bleiben für eine spätere Prüfung erhalten und werden mitgesichert. Kann die laufende
+Videoaufnahme ihre ersten Metadaten nicht sichern, meldet die App den Schreibfehler und beendet die Aufnahme. Neue Fotos
+werden nur gespeichert, wenn sämtliche Erkennungsmarkierungen kodiert werden können. Beim Import alter Web-Sicherungen
+führen beschädigte Fotomarkierungen oder GPS-Punkte zu einem Fehler und einem vollständigen Rollback, statt unbemerkt
+verloren zu gehen. Für diesen Stand bestanden 55 Logiktests und ein UI-Test mit zwei ausgewählten Fotos im Simulator.
 
 ## Bauen
 

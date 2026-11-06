@@ -187,9 +187,14 @@ final class VideoRecorder {
         }
         if !rec.savedInitialRecord {
             // Vorschaubild und Metadaten im Zustand "recording": nach einem Absturz findet die App den Clip wieder
-            rec.savedInitialRecord = true
             writeThumbnail(out, rec)
-            try? ClipFiles.save(record(rec, notes: Notes(species: [], sightingIds: [], dropped: 0), state: .recording), in: rec.info.directory)
+            do {
+                try ClipFiles.save(record(rec, notes: Notes(species: [], sightingIds: [], dropped: 0), state: .recording),
+                                   in: rec.info.directory)
+                rec.savedInitialRecord = true
+            } catch {
+                fail(rec, "Videometadaten konnten nicht gesichert werden: \(error.localizedDescription)")
+            }
         }
     }
 

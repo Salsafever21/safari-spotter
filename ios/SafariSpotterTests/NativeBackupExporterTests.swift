@@ -4,6 +4,14 @@ import SwiftData
 
 @MainActor
 final class NativeBackupExporterTests: StoreTestCase {
+    func testUnencodablePhotoMarkersDoNotCreatePhoto() throws {
+        let invalid = PhotoDet(x: .nan, y: 0, w: 20, h: 20, name: "Elefant", conf: 0.9, sure: true)
+        XCTAssertThrowsError(try PhotoItem(t: .now, kind: "auto", species: ["Elefant"], dets: [invalid],
+                                               image: Self.jpeg(), thumb: nil, width: 8, height: 8,
+                                               position: nil, sightingIds: []))
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PhotoItem>()).isEmpty)
+    }
+
     func testCorruptDrivePointsCannotProduceIncompleteBackup() throws {
         let drive = try Drive(startedAt: .now.addingTimeInterval(-60), endedAt: .now,
                               dist: 500, points: [], sightings: 0)
@@ -42,7 +50,7 @@ final class NativeBackupExporterTests: StoreTestCase {
         let sighting = addSighting("Breitmaulnashorn", position: coarsePosition)
         let photo = addPhoto(species: ["Breitmaulnashorn"], position: coarsePosition,
                              sightingIds: [sighting.id])
-        let cameraPhoto = PhotoItem(t: .now, kind: "cam", species: [], dets: [], image: Self.jpeg(),
+        let cameraPhoto = try PhotoItem(t: .now, kind: "cam", species: [], dets: [], image: Self.jpeg(),
                                     thumb: nil, width: 8, height: 8, position: nil, sightingIds: [])
         context.insert(cameraPhoto)
         let correction = Correction(image: Self.jpeg(), predicted: "Löwe", predKey: nil,

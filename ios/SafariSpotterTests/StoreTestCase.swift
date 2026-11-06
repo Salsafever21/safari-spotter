@@ -33,7 +33,7 @@ class StoreTestCase: XCTestCase {
 
     @discardableResult
     func addPhoto(species: [String], dets: [PhotoDet] = [], position: Position? = nil, located: Bool = true, sightingIds: [UUID]) -> PhotoItem {
-        let p = PhotoItem(t: .now, kind: "auto", species: species, dets: dets, image: Self.jpeg(), thumb: nil, width: 8, height: 8,
+        let p = try! PhotoItem(t: .now, kind: "auto", species: species, dets: dets, image: Self.jpeg(), thumb: nil, width: 8, height: 8,
                           position: located ? (position ?? exactPosition) : nil, sightingIds: sightingIds)
         context.insert(p); try? context.save()
         return p

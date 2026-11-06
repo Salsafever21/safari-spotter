@@ -523,9 +523,15 @@ struct PhotoAnalysisView: View {
             initialPhoto.sightingIds = ids
             initialPhoto.lat = pos?.lat; initialPhoto.lon = pos?.lon; initialPhoto.coarse = pos?.coarse ?? false
         } else if let jpeg {
-            let photo = PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids)
-            photo.detsJSON = encodedDets
-            context.insert(photo)
+            do {
+                let photo = try PhotoItem(t: r.meta.date ?? .now, kind: "photo", species: names, dets: r.dets, image: jpeg, thumb: r.image.preparingThumbnail(of: CGSize(width: 160, height: 160))?.jpegData(compressionQuality: 0.7), width: Int(r.image.size.width * r.image.scale), height: Int(r.image.size.height * r.image.scale), position: pos, sightingIds: ids)
+                photo.detsJSON = encodedDets
+                context.insert(photo)
+            } catch {
+                context.rollback()
+                analysisError = "Foto konnte nicht vorbereitet werden: \(error.localizedDescription)"
+                return
+            }
         }
         do { try context.save(); advance() }
         catch {

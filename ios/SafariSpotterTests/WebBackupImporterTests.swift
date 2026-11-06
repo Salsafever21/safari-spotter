@@ -51,7 +51,38 @@ final class WebBackupImporterTests: StoreTestCase {
         XCTAssertEqual(photo.lon, 31.54321)
     }
 
-    private func makeArchive(photo: Data, corruptHash: Bool = false, sightingName: String = "Breitmaulnashorn") throws -> (URL, Data) {
+    func testInvalidPhotoMarkerRejectsEntireImport() throws {
+        let (url, file) = try makeArchive(photo: StoreTestCase.jpeg(), dets: [["box": [0.1, 0.2, 0.3]]])
+        defer { try? FileManager.default.removeItem(at: url); cleanupArchive(file) }
+        XCTAssertThrowsError(try WebBackupImporter.perform(url: url, context: context)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Markierung 1"))
+        }
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Sighting>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PhotoItem>()).count, 0)
+    }
+
+    func testInvalidDrivePointRejectsEntireImport() throws {
+        let (url, file) = try makeArchive(photo: StoreTestCase.jpeg(),
+                                          points: [[1_762_336_000_000 as Double, -24.98, "invalid", 2.0]])
+        defer { try? FileManager.default.removeItem(at: url); cleanupArchive(file) }
+        XCTAssertThrowsError(try WebBackupImporter.perform(url: url, context: context)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Punkt 1"))
+        }
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Sighting>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PhotoItem>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Drive>()).count, 0)
+    }
+
+    private func cleanupArchive(_ file: Data) {
+        let hash = SHA256.hash(data: file).map { String(format: "%02x", $0) }.joined()
+        for url in WebBackupImporter.archivedFiles() where url.lastPathComponent.hasPrefix(hash) {
+            try? WebBackupImporter.deleteArchivedFile(url)
+        }
+    }
+
+    private func makeArchive(photo: Data, corruptHash: Bool = false, sightingName: String = "Breitmaulnashorn",
+                             dets: [[String: Any]] = [],
+                             points: [[Any]] = [[1_762_336_000_000 as Double, -24.98, 31.54, 2.0, 300.0]]) throws -> (URL, Data) {
         let checksum = SHA256.hash(data: photo).map { String(format: "%02x", $0) }.joined()
         let thumb = "data:image/jpeg;base64," + photo.base64EncodedString()
         let manifest: [String: Any] = [
@@ -65,10 +96,10 @@ final class WebBackupImporterTests: StoreTestCase {
                                "n": 1, "lat": -24.98765, "lon": 31.54321, "acc": 5]],
                 "trip": ["active": false, "startedAt": 0, "points": [], "dist": 0],
                 "trips": [["startedAt": 1_762_336_000_000 as Double, "endedAt": 1_762_336_060_000 as Double,
-                           "dist": 123.0, "points": [[1_762_336_000_000 as Double, -24.98, 31.54, 2.0, 300.0]], "sightings": 1]]
+                           "dist": 123.0, "points": points, "sightings": 1]]
             ],
             "photos": [["metadata": ["id": 7, "t": 1_762_336_000_000 as Double, "kind": "auto", "species": [],
-                                      "dets": [], "w": 8, "h": 8, "sightIds": ["s1"], "lat": -24.98765,
+                                      "dets": dets, "w": 8, "h": 8, "sightIds": ["s1"], "lat": -24.98765,
                                       "lon": 31.54321, "acc": 5, "thumb": thumb],
                         "offset": 0, "length": photo.count, "type": "image/jpeg",
                         "sha256": corruptHash ? String(repeating: "0", count: 64) : checksum]],

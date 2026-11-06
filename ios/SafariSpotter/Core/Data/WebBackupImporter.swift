@@ -131,18 +131,30 @@ enum WebBackupImporter {
                 if photoIDs.contains(id) { continue }
                 let species = record["species"] as? [String] ?? []
                 let ids = (record["sightIds"] as? [Any] ?? []).map { stableID(origin, "sighting", $0) }
+                let rawDets: [[String: Any]]
+                if let value = record["dets"] {
+                    guard let entries = value as? [[String: Any]] else {
+                        throw ImportError.invalid("Foto \(index + 1), Markierungen")
+                    }
+                    rawDets = entries
+                } else {
+                    rawDets = []
+                }
                 let sensitivePhoto = species.contains(where: sensitive)
                     || ids.contains { sightingNames[$0].map(sensitive) ?? false }
-                    || (record["dets"] as? [[String: Any]] ?? []).contains { ($0["name"] as? String).map(sensitive) ?? false }
+                    || rawDets.contains { ($0["name"] as? String).map(sensitive) ?? false }
                 let image = bytes[(binaryStart + offset)..<(binaryStart + offset + length)]
-                let dets = (record["dets"] as? [[String: Any]] ?? []).compactMap { det -> PhotoDet? in
+                let dets = try rawDets.enumerated().map { detIndex, det -> PhotoDet in
                     guard let box = det["box"] as? [Any], box.count == 4,
                           let x = number(box[0]), let y = number(box[1]),
-                          let w = number(box[2]), let h = number(box[3]) else { return nil }
+                          let w = number(box[2]), let h = number(box[3]),
+                          x.isFinite, y.isFinite, w.isFinite, h.isFinite else {
+                        throw ImportError.invalid("Foto \(index + 1), Markierung \(detIndex + 1)")
+                    }
                     return PhotoDet(x: x, y: y, w: w, h: h, name: det["name"] as? String,
                                     conf: number(det["conf"]) ?? 0, sure: det["sure"] as? Bool ?? false)
                 }
-                let item = PhotoItem(t: Date(timeIntervalSince1970: ms / 1000),
+                let item = try PhotoItem(t: Date(timeIntervalSince1970: ms / 1000),
                                      kind: record["kind"] as? String ?? "auto", species: species, dets: dets,
                                      image: Data(image), thumb: imageData(record["thumb"]),
                                      width: int(record["w"]) ?? 0, height: int(record["h"]) ?? 0,
@@ -176,10 +188,24 @@ enum WebBackupImporter {
                 guard let start = number(record["startedAt"]), let end = number(record["endedAt"]) else {
                     throw ImportError.invalid("Game Drive \(index + 1)")
                 }
-                let points = (record["points"] as? [[Any]] ?? []).compactMap { p -> TrackPoint? in
+                let rawPoints: [[Any]]
+                if let value = record["points"] {
+                    guard let entries = value as? [[Any]] else {
+                        throw ImportError.invalid("Game Drive \(index + 1), Fahrtspur")
+                    }
+                    rawPoints = entries
+                } else {
+                    rawPoints = []
+                }
+                let points = try rawPoints.enumerated().map { pointIndex, p -> TrackPoint in
                     guard p.count >= 4, let t = number(p[0]), let lat = number(p[1]),
-                          let lon = number(p[2]), let speed = number(p[3]) else { return nil }
-                    return TrackPoint(t: t / 1000, lat: lat, lon: lon, spd: speed, alt: p.count > 4 ? number(p[4]) : nil)
+                          let lon = number(p[2]), let speed = number(p[3]),
+                          t.isFinite, lat.isFinite, lon.isFinite, speed.isFinite,
+                          p.count <= 4 || p[4] is NSNull || number(p[4])?.isFinite == true else {
+                        throw ImportError.invalid("Game Drive \(index + 1), Punkt \(pointIndex + 1)")
+                    }
+                    return TrackPoint(t: t / 1000, lat: lat, lon: lon, spd: speed,
+                                      alt: p.count > 4 ? number(p[4]) : nil)
                 }
                 let item = try Drive(startedAt: Date(timeIntervalSince1970: start / 1000),
                                  endedAt: Date(timeIntervalSince1970: end / 1000),

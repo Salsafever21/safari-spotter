@@ -42,9 +42,9 @@ final class PhotoItem {
     var coarse: Bool
     var sightingIds: [UUID]
 
-    init(t: Date, kind: String, species: [String], dets: [PhotoDet], image: Data, thumb: Data?, width: Int, height: Int, position: Position?, sightingIds: [UUID]) {
+    init(t: Date, kind: String, species: [String], dets: [PhotoDet], image: Data, thumb: Data?, width: Int, height: Int, position: Position?, sightingIds: [UUID]) throws {
         id = UUID(); self.t = t; self.kind = kind; self.species = species
-        detsJSON = try? JSONEncoder().encode(dets)
+        detsJSON = try JSONEncoder().encode(dets)
         self.image = image; self.thumb = thumb; self.width = width; self.height = height
         lat = position?.lat; lon = position?.lon; coarse = position?.coarse ?? false; self.sightingIds = sightingIds
     }
