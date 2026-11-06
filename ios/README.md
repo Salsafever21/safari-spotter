@@ -46,6 +46,9 @@ wartet auf das Ende eines Game Drives oder einer Videoaufnahme. Für diesen Stan
 „Namen einblenden“ steuert nun auch die Live-Kamera: Rahmen bleiben sichtbar, Namen und Hinweise werden ausgeblendet.
 Der Bildbetrachter verwendet bei älteren Fotos ohne gespeicherte Abmessungen die Bilddatei als Grössenquelle und zeigt
 einen Hinweis, falls ein Foto nicht dekodiert werden kann.
+Der Export der geprüften Korrekturen erzeugt die JSON-Datei erst beim Tippen auf **Korrekturen exportieren**. Jede
+Freigabe erhält eine eigene Datei, damit Änderungen an der Prüfliste eine bereits geöffnete Freigabe nicht überschreiben;
+Schreibfehler erscheinen in der App. Die temporäre Datei wird nach dem Schliessen des Teilen-Dialogs entfernt.
 
 ## Bauen
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import MapKit
+import UIKit
 
 /// Sichtungen: Liste, Zählung, Karte (Route, Fotos, Sichtungen), Galerie, Prüfen
 struct SightingsView: View {
@@ -281,7 +282,8 @@ struct ReviewView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var catalog: SpeciesCatalog
     @Query(filter: #Predicate<Correction> { $0.status != "review" }) private var done: [Correction]
-    @State private var picking: Correction?
+    @State private var activeSheet: ReviewSheet?
+    @State private var exportedURL: URL?
     @State private var storageError: String?
     @State private var confirmDeleteDone = false
     var body: some View {
@@ -293,22 +295,30 @@ struct ReviewView: View {
                     VStack(alignment: .leading) {
                         Text(c.predicted ?? "unbestimmt").bold(); Text("\(Int((c.conf ?? 0) * 100)) % · \(fmtTime(c.t))").font(.caption).foregroundStyle(.secondary)
                         HStack { Button("Richtig") { c.status = "confirmed"; c.label = c.predicted; c.labelKey = c.predKey; commit("Prüfung speichern") }.tint(.green)
-                            Button("Falsch …") { picking = c }; Button("Löschen", role: .destructive) { context.delete(c); commit("Prüfung löschen") } }.buttonStyle(.bordered).font(.caption)
+                            Button("Falsch …") { activeSheet = .picker(c) }; Button("Löschen", role: .destructive) { context.delete(c); commit("Prüfung löschen") } }.buttonStyle(.bordered).font(.caption)
                     }
                 }
             }
             Section {
-                if let url = exportURL { ShareLink(item: url) { Label("Korrekturen exportieren (\(done.count) geprüft)", systemImage: "square.and.arrow.up") } }
+                Button { exportCorrections() } label: {
+                    Label("Korrekturen exportieren (\(done.count) geprüft)", systemImage: "square.and.arrow.up")
+                }.disabled(done.isEmpty)
                 Button("Geprüfte löschen", role: .destructive) { confirmDeleteDone = true }
             }
         }
-        .sheet(item: $picking) { c in SpeciesPicker(predicted: c.predicted) { name, key in
-            c.status = "corrected"; c.label = name; c.labelKey = key; commit("Korrektur speichern")
-        } }
+        .sheet(item: $activeSheet, onDismiss: cleanupExport) { sheet in
+            switch sheet {
+            case .picker(let c):
+                SpeciesPicker(predicted: c.predicted) { name, key in
+                    c.status = "corrected"; c.label = name; c.labelKey = key; commit("Korrektur speichern")
+                }
+            case .share(let url): CorrectionShareSheet(url: url)
+            }
+        }
         .confirmationDialog("Alle geprüften Einträge löschen?", isPresented: $confirmDeleteDone) {
             Button("Geprüfte löschen", role: .destructive) { done.forEach { context.delete($0) }; commit("Geprüfte Einträge löschen") }
         }
-        .alert("Speichern fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
+        .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { storageError != nil }, set: { if !$0 { storageError = nil } })) {
             Button("OK") {}
         } message: { Text(storageError ?? "") }
     }
@@ -316,15 +326,34 @@ struct ReviewView: View {
         do { try context.save() }
         catch { context.rollback(); storageError = "\(action) fehlgeschlagen: \(error.localizedDescription)" }
     }
-    private var exportURL: URL? {
-        // Explizite Typen: gemischte Dictionary-Literale ohne Typangabe kompilieren nicht. Fehlende Werte als null wie im Web.
-        let items = done.map { c -> [String: Any] in
-            ["img": "data:image/jpeg;base64," + c.image.base64EncodedString(), "predicted": c.predicted ?? NSNull(), "predKey": c.predKey ?? NSNull(), "conf": c.conf ?? NSNull(),
-             "label": c.label ?? NSNull(), "labelKey": c.labelKey ?? NSNull(), "status": c.status, "t": c.t.timeIntervalSince1970 * 1000, "region": c.region ?? NSNull()]
-        }
-        let payload: [String: Any] = ["app": "Safari Spotter iOS", "exported": ISO8601DateFormatter().string(from: .now), "items": items]
-        guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("korrekturen.json")
-        return (try? data.write(to: url)) != nil ? url : nil
+    private func exportCorrections() {
+        do {
+            let url = try CorrectionExporter.create(done)
+            exportedURL = url
+            activeSheet = .share(url)
+        } catch { storageError = "Korrekturen konnten nicht exportiert werden: \(error.localizedDescription)" }
     }
+    private func cleanupExport() {
+        if let exportedURL { try? FileManager.default.removeItem(at: exportedURL) }
+        exportedURL = nil
+    }
+}
+
+private enum ReviewSheet: Identifiable {
+    case picker(Correction)
+    case share(URL)
+    var id: String {
+        switch self {
+        case .picker(let correction): return "picker-" + correction.id.uuidString
+        case .share(let url): return "share-" + url.lastPathComponent
+        }
+    }
+}
+
+private struct CorrectionShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

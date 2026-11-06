@@ -51,6 +51,40 @@ enum Exporters {
     }
 }
 
+/// Creates a stable snapshot of reviewed classifier crops only when the user exports them.
+@MainActor
+enum CorrectionExporter {
+    enum ExportError: LocalizedError {
+        case empty
+        var errorDescription: String? { "Keine geprüften Korrekturen zum Exportieren vorhanden." }
+    }
+
+    static func create(_ corrections: [Correction],
+                       directory: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        guard !corrections.isEmpty else { throw ExportError.empty }
+        let items: [[String: Any]] = corrections.map { c in
+            ["img": "data:image/jpeg;base64," + c.image.base64EncodedString(),
+             "predicted": c.predicted ?? NSNull(), "predKey": c.predKey ?? NSNull(),
+             "conf": c.conf ?? NSNull(), "label": c.label ?? NSNull(),
+             "labelKey": c.labelKey ?? NSNull(), "status": c.status,
+             "t": c.t.timeIntervalSince1970 * 1000, "region": c.region ?? NSNull()]
+        }
+        let payload: [String: Any] = ["app": "Safari Spotter iOS",
+                                      "exported": ISO8601DateFormatter().string(from: .now),
+                                      "items": items]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let url = directory.appendingPathComponent("safari-spotter-korrekturen-\(UUID().uuidString).json")
+        do {
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+}
+
 /// Fotos-App: Bild mit Aufnahmedatum, Standort und Beschreibung (EXIF/TIFF) sichern, so erscheint es auf der Orte-Karte.
 /// Artenschutz: Die Position, mit der ein Foto die App verlässt, kommt immer aus `exportCoordinate` (zweite Absicherung,
 /// greift auch bei Fotos, die vor dieser Regel oder per Import gespeichert wurden).
