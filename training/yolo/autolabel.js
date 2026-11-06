@@ -7,12 +7,12 @@ const fs = require('fs'), path = require('path');
 const tf = require('@tensorflow/tfjs-node');
 const cocoSsd = require('@tensorflow-models/coco-ssd');
 const { isValidation, eligibleFiles, retireStaleLinks } = require('../dataset');
+const { acceptsPrediction } = require('./detection_filter');
 const ROOT = path.resolve(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'training', 'data');
 const OUT = path.join(__dirname, 'dataset');
 const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'training', 'species.json'), 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));
-const ANIMAL = new Set(['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']);
 const limit = (() => { const i = process.argv.indexOf('--limit'); return i > 0 ? parseInt(process.argv[i + 1], 10) : 0; })();
 const overwrite = process.argv.includes('--overwrite');
 function localHandler(p) { const dir = path.dirname(p); return { load: async () => tf.io.getModelArtifactsForJSON(JSON.parse(fs.readFileSync(p, 'utf8')), async (groups) => { const specs = [], bufs = []; for (const g of groups) { specs.push(...g.weights); for (const q of g.paths) bufs.push(fs.readFileSync(path.join(dir, q))); } const total = bufs.reduce((a, b) => a + b.length, 0); const out = new Uint8Array(total); let off = 0; for (const b of bufs) { out.set(b, off); off += b.length; } return [specs, out.buffer]; }) }; }
@@ -46,6 +46,8 @@ function writeLabel(file, lines) {
   const priorReview = fs.existsSync(reviewPath) ? JSON.parse(fs.readFileSync(reviewPath, 'utf8')) : {};
   const fallbackFiles = new Set(Array.isArray(priorReview.fallbackFiles) ? priorReview.fallbackFiles.filter((x) => allowedSources.has(x)) : []);
   const multipleBoxFiles = new Set(Array.isArray(priorReview.multipleBoxFiles) ? priorReview.multipleBoxFiles.filter((x) => allowedSources.has(x)) : []);
+  const approvedFiles = Object.fromEntries(Object.entries(priorReview.approvedFiles || {})
+    .filter(([relative]) => allowedSources.has(relative)));
   let n = 0, boxed = 0, fallback = 0, negatives = 0, reused = 0; const t0 = Date.now();
   for (const [ci, c] of classes.entries()) {
     const dir = path.join(DATA, c.key); if (!fs.existsSync(dir)) continue;
@@ -64,8 +66,10 @@ function writeLabel(file, lines) {
           const rows = saved.split('\n');
           if (rows.length === 1 && rows[0] === `${ci} 0.50000 0.50000 0.80000 0.80000`) {
             fallbackFiles.add(relative);
-          } else fallbackFiles.delete(relative);
-          if (rows.length > 1) multipleBoxFiles.add(relative); else multipleBoxFiles.delete(relative);
+          }
+          // A manual edit does not clear the review requirement. Only an explicit
+          // approval tied to the current JPEG and label hashes can clear it.
+          if (rows.length > 1) multipleBoxFiles.add(relative);
           reused++;
           continue;
         }
@@ -76,17 +80,17 @@ function writeLabel(file, lines) {
       const preds = await det.detect(img, 10, 0.2);
       img.dispose();
       // beste Tier-Box (grösste mit Score ≥ 0.3), sonst Rückfall
-      const animals = preds.filter((p) => ANIMAL.has(p.class) && p.score >= 0.3).sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3]);
+      const animals = preds.filter((p) => acceptsPrediction(c.key, p))
+        .sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3]);
       let boxes;
       if (animals.length) {
         // alle Tier-Boxen derselben Art (Herden): nur Boxen, die mindestens 25 % der grössten haben
         const big = animals[0].bbox[2] * animals[0].bbox[3];
         boxes = animals.filter((p) => p.bbox[2] * p.bbox[3] >= big * 0.25).map((p) => p.bbox); boxed++;
-        fallbackFiles.delete(relative);
-        if (boxes.length > 1) multipleBoxFiles.add(relative); else multipleBoxFiles.delete(relative);
+        if (boxes.length > 1) multipleBoxFiles.add(relative);
       } else {
         boxes = [[W * 0.1, H * 0.1, W * 0.8, H * 0.8]]; fallback++;
-        fallbackFiles.add(relative); multipleBoxFiles.delete(relative);
+        fallbackFiles.add(relative);
       }
       const lines = boxes.map(([x, y, w, h]) => { const cx = Math.min(1, Math.max(0, (x + w / 2) / W)), cy = Math.min(1, Math.max(0, (y + h / 2) / H)); return `${ci} ${cx.toFixed(5)} ${cy.toFixed(5)} ${Math.min(1, w / W).toFixed(5)} ${Math.min(1, h / H).toFixed(5)}`; });
       ensureLink(path.join(dir, f), link);
@@ -118,6 +122,6 @@ function writeLabel(file, lines) {
   const yaml = `# YOLO-Datensatz Safari Spotter (Auto-Labels aus COCO-SSD, Art aus dem Ordnernamen)\npath: ${OUT}\ntrain: images/train\nval: images/val\nnames:\n` + names.map((k, i) => `  ${i}: ${k}`).join('\n') + '\n';
   fs.writeFileSync(path.join(__dirname, 'dataset.yaml'), yaml);
   writeLabel(reviewPath, JSON.stringify({ generatedAt: new Date().toISOString(),
-    fallbackFiles: [...fallbackFiles].sort(), multipleBoxFiles: [...multipleBoxFiles].sort() }, null, 2) + '\n');
+    fallbackFiles: [...fallbackFiles].sort(), multipleBoxFiles: [...multipleBoxFiles].sort(), approvedFiles }, null, 2) + '\n');
   console.log(`fertig: ${n} neue Tierbilder, ${boxed} mit Detektor-Box, ${fallback} mit Rückfall-Box, ${negatives} neue Gegenbeispiele, ${reused} bestehende Labels beibehalten, ${retired} veraltete Verknüpfungen archiviert, ${((Date.now() - t0) / 1000).toFixed(0)} s -> ${OUT}`);
 })().catch((e) => { console.error(e); process.exit(1); });

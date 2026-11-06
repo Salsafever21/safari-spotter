@@ -5,8 +5,8 @@
   "description": "Trainingspipeline für den Artenkopf des Safari Spotters",
   "scripts": {
     "download": "python3 download.py",
-    "embed": "node embed.js",
-    "train": "node train.js"
+    "embed": "./node22.sh embed.js",
+    "train": "./node22.sh train.js"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "2.2.3",

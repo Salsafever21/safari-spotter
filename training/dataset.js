@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const ambiguousCache = new WeakMap();
+const excludedPhotos = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(__dirname, 'excluded_photos.json'), 'utf8'))));
 
 function sourceIdentity(relative, record) {
   if (record.source === 'safari-spotter-correction') {
@@ -45,7 +46,7 @@ function eligibleFiles(dir, classKey, manifest) {
     if (!file.endsWith('.jpg')) return false;
     const relative = classKey + '/' + file;
     const record = manifest[relative];
-    return record && !record.superseded &&
+    return !excludedPhotos.has(relative) && record && !record.superseded &&
       (record.source === 'safari-spotter-correction' || ['cc0', 'cc-by'].includes(record.license)) &&
       !ambiguousSources(manifest).has(sourceIdentity(relative, record));
   }).sort();

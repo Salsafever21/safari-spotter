@@ -26,8 +26,8 @@ Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanif
 cd training && ./setup_node_mac.sh  # Apple-Silicon-Mac: TensorFlow auch bei Leerzeichen im Projektpfad
 python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY), Liste in species.json
 python3 import_corrections.py /Pfad/zu/korrekturen.json  # optional: geprüfte Ausschnitte aus der App (Pillow nötig)
-node embed.js                  # MobileNet-Embeddings mit demselben Graph wie im Browser
-node train.js                  # Kopf trainieren, Bericht in report.json, Export nach ../models/head/<version>/
+./node22.sh embed.js          # MobileNet-Embeddings mit demselben Graph wie im Browser
+HEAD_VERSION=1.2.2-candidate ./node22.sh train.js  # neuer Kandidat samt Bericht unter ../models/head/<version>/
 ```
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
@@ -37,6 +37,9 @@ mehrfach korrigierter Art nur die neueste geprüfte Bezeichnung. Ältere Dateien
 vom Training ausgeschlossen. Alle Bilder bleiben in `training/data/`; dort zählen sie nicht gegen die iNaturalist-Downloadquote.
 Die Validierung trennt Bilder nach Beobachtung bzw. Original-JPEG. Ähnliche Bilder aus verschiedenen Aufnahmen können
 weiterhin auf beiden Seiten liegen, deshalb bleibt ein unabhängiger Feldtest nötig.
+`train.js` verlangt mindestens 20 Trainings- und 3 Validierungsfotos pro Art sowie eine neue `HEAD_VERSION` und
+überschreibt vorhandene Modellversionen nicht. Der bisherige Artenkopf bleibt dadurch bis zu einer ausdrücklichen
+Qualitätsprüfung erhalten.
 Ein Export trainiert das Modell nicht automatisch: Nach dem Import müssen `embed.js`, `train.js` und für iOS die
 Core-ML-Konvertierung aus `ios/README.md` erneut laufen. Die lokale Testmenge allein belegt keine Erkennungsqualität im Feld.
 

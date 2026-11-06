@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { eligibleFiles, isValidation, ambiguousSources } = require('../dataset');
+const { approvalMatches } = require('./review_label');
 
 const HERE = __dirname;
 const DATA = path.resolve(HERE, '..', 'data');
@@ -26,6 +27,8 @@ for (const c of spec.classes) {
 
 const counts = Object.fromEntries(spec.classes.map((c) => [c.key, { train: 0, val: 0 }]));
 const observations = new Map();
+const observedFallback = new Set(), observedMultiple = new Set();
+const labelFor = new Map();
 let labels = 0;
 for (const split of ['train', 'val']) {
   const imagesDir = path.join(OUT, 'images', split);
@@ -46,6 +49,11 @@ for (const split of ['train', 'val']) {
     const label = path.join(labelsDir, file.replace(/\.jpg$/, '.txt'));
     if (!fs.existsSync(label)) { errors.push('Label fehlt: ' + label); continue; }
     const rows = fs.readFileSync(label, 'utf8').trim().split('\n').filter(Boolean);
+    labelFor.set(expected, label);
+    if (rows.length === 1 && rows[0] === `${classes.indexOf(key)} 0.50000 0.50000 0.80000 0.80000`) {
+      observedFallback.add(expected);
+    }
+    if (rows.length > 1) observedMultiple.add(expected);
     if (negative.has(key) && rows.length) errors.push('Negatives Beispiel hat Tier-Boxen: ' + label);
     if (!negative.has(key) && !rows.length) errors.push('Tierbild hat keine Box: ' + label);
     for (const row of rows) {
@@ -75,7 +83,19 @@ if (!partial) {
 }
 const reviewPath = path.join(OUT, 'label-review.json');
 const review = fs.existsSync(reviewPath) ? JSON.parse(fs.readFileSync(reviewPath, 'utf8')) : {};
-console.log(`Geprüft: ${labels} Bilder, ${observations.size} Beobachtungen, ${review.fallbackFiles?.length || 0} Rückfall-Boxen, ${review.multipleBoxFiles?.length || 0} Mehrfach-Boxen`);
+const fallback = new Set(review.fallbackFiles || []);
+const multiple = new Set(review.multipleBoxFiles || []);
+for (const relative of observedFallback) if (!fallback.has(relative)) errors.push('Rückfall-Box fehlt in Prüfliste: ' + relative);
+for (const relative of observedMultiple) if (!multiple.has(relative)) errors.push('Mehrfach-Box fehlt in Prüfliste: ' + relative);
+const queued = new Set([...fallback, ...multiple]);
+const unreviewed = [...queued].filter((relative) => {
+  const label = labelFor.get(relative);
+  return !label || !approvalMatches(review.approvedFiles?.[relative], path.join(DATA, relative), label);
+});
+if (!partial && unreviewed.length) {
+  errors.push(`${unreviewed.length} Rückfall-/Mehrfach-Labels noch nicht am Bild geprüft oder nach Prüfung verändert; Beispiele: ${unreviewed.slice(0, 5).join(', ')}`);
+}
+console.log(`Geprüft: ${labels} Bilder, ${observations.size} Beobachtungen, ${fallback.size} Rückfall-Boxen, ${multiple.size} Mehrfach-Boxen, ${unreviewed.length} zur Sichtprüfung offen`);
 const ambiguous = [...ambiguousSources(manifest)].sort();
 if (ambiguous.length) console.log(`${ambiguous.length} widersprüchliche Fotoquellen ausgeschlossen: ${ambiguous.slice(0, 10).join(', ')}`);
 console.log('Klassen mit Bildern:', Object.values(counts).filter((c) => c.train + c.val > 0).length, '/', spec.classes.length);

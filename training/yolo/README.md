@@ -20,7 +20,7 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    ```
 2. **Auto-Labeln**: Der vorhandene COCO-Detektor zeichnet die Rahmen, die Art kommt aus dem Ordnernamen.
    ```
-   cd training && ./setup_node_mac.sh && node yolo/autolabel.js
+   cd training && ./setup_node_mac.sh && ./node22.sh yolo/autolabel.js
    ```
    Ergebnis: `training/yolo/dataset/{images,labels}/{train,val}` (Bilder als Symlinks, 15 % Validierung, gruppiert nach
    iNaturalist-Beobachtung bzw. Original-JPEG einer Korrektur), `dataset.yaml` (mit absolutem Pfad, also auf dem Rechner
@@ -28,11 +28,23 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    CC0-/CC-BY-Lizenz oder geprüfter Korrektur; ersetzte Beschriftungen und verwaiste Bilddateien bleiben draussen.
    Ein und dieselbe iNaturalist-Foto-ID oder Korrekturquelle in mehreren Artordnern wird wegen des widersprüchlichen
    Labels aus beiden Trainingspfaden ausgeschlossen; die Quelldateien bleiben erhalten.
+   Nach Sichtprüfung ausgeschlossene Fotos stehen mit Grund in `training/excluded_photos.json`; auch sie bleiben als
+   Originaldateien und Manifest-Einträge erhalten, werden aber weder für den Artenkopf noch YOLO verwendet.
    Ein erneuter Lauf erhält bestehende, auch manuell überarbeitete Labeldateien. `--overwrite` erzeugt sie bewusst neu;
    bei geänderter Klassenreihenfolge stoppt das Skript, damit alte Labelnummern nicht falsch verwendet werden.
    Wird eine Korrektur später ersetzt, entfernt der nächste Lauf nur ihre alte Bildverknüpfung aus dem Datensatz und
    verschiebt das bisherige Label nach `dataset/excluded/`. Das Originalbild und die alte Beschriftung bleiben erhalten.
    `dataset/label-review.json` listet Bilder mit Rückfall-Box und Bildern mit mehreren Tier-Boxen zur gezielten Sichtprüfung.
+   Der COCO-Detektor darf deutliche Fremdarten (Elefant, Zebra, Giraffe) nicht als Box einer anderen Art übernehmen;
+   für Vogelklassen gelten nur Vogel-Boxen. Diese Filter können zusätzliche Rückfall-Boxen erzeugen.
+   Der vollständige Audit verweigert das Training, solange Bilder aus dieser Prüfliste nicht ausdrücklich am Foto
+   geprüft wurden. Nach dem Prüfen und gegebenenfalls Korrigieren der YOLO-Labeldatei:
+   ```
+   ./node22.sh yolo/review_label.js <klasse/foto.jpg> --reviewed
+   ```
+   Die Freigabe speichert Prüfsummen von Originalfoto und Label in der lokalen `label-review.json`. Ändert sich danach
+   das Foto oder der Rahmen, ist eine erneute Sichtprüfung nötig. `--partial` prüft nur die Struktur und zeigt die
+   noch offenen Bilder an; es ist keine Trainingsfreigabe.
    Vor dem Trainieren prüft `node yolo/audit_dataset.js` alle Bildverknüpfungen, Labelwerte, Lizenz-/Quelleneinträge,
    Beobachtungsgruppen und die Mindestmenge je Klasse (20 Train, 3 Val). Für einen Probelauf mit `--limit` geht
    `node yolo/audit_dataset.js --partial`; `train_mac.sh` verlangt den vollständigen erfolgreichen Audit.
@@ -40,12 +52,13 @@ und Artenkopf bleiben bis dahin die veröffentlichte Erkennung.
    Probelauf: `node yolo/autolabel.js --limit 20`.
 
    Was die Auto-Labels können und was nicht:
-   - Rund 85 % der Bilder bekommen eine echte Detektor-Box, der Rest (vor allem Reptilien, Vögel am Boden, Pinguine) eine
-     zentrierte Rückfall-Box über 80 % des Bildes. iNaturalist-Fotos zeigen das Tier meist bildfüllend, darum ist das brauchbar.
+   - Viele Bilder bekommen eine echte Detektor-Box. Der Rest (vor allem Reptilien, Vögel am Boden und Pinguine) bekommt
+     zunächst eine zentrierte Rückfall-Box über 80 % des Bildes. Ein Stichprobencheck zeigte, dass solche Boxen kleine
+     oder verdeckte Tiere oft verfehlen; sie sind deshalb nur ein Vorschlag zur manuellen Prüfung, kein fertiges Label.
    - Herden: Es werden alle Tier-Boxen behalten, die mindestens 25 % der grössten Box haben. Teilweise sichtbare zweite Tiere
      am Bildrand bleiben manchmal ohne Box; das kostet etwas Genauigkeit, aber kein Training.
-   - Wer mehr will, prüft die Labels in einem Werkzeug wie Label Studio oder Roboflow (YOLO-Format wird direkt importiert) und
-     korrigiert vor allem die Rückfall-Boxen.
+   - Auch mehrere Detektor-Boxen können verschiedene Tierarten zeigen. Alle Rückfall- und Mehrfach-Labels müssen vor
+     einem Trainingslauf am Bild geprüft werden; ein Werkzeug wie Label Studio kann YOLO-Labels direkt bearbeiten.
 3. **Trainieren und exportieren** (Mac, Apple Silicon):
    ```
    uv venv training/.venv --python 3.11

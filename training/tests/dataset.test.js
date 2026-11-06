@@ -105,3 +105,18 @@ test('conflicting active corrections from one original JPEG are excluded', () =>
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a visually rejected photo stays on disk but leaves both training paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spotter-rejected-'));
+  try {
+    const dir = path.join(root, 'karakal');
+    fs.mkdirSync(dir);
+    const file = path.join(dir, '30955166.jpg');
+    fs.writeFileSync(file, 'original image remains');
+    const manifest = { 'karakal/30955166.jpg': { license: 'cc-by', observation: 123 } };
+    assert.deepEqual(eligibleFiles(dir, 'karakal', manifest), []);
+    assert.ok(fs.existsSync(file));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
