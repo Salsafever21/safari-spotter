@@ -238,8 +238,16 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     func setZoom(_ z: CGFloat) {
         queue.async { [self] in
             guard let d = self.device else { return }
-            try? d.lockForConfiguration(); d.videoZoomFactor = max(d.minAvailableVideoZoomFactor, min(z, d.maxAvailableVideoZoomFactor)); d.unlockForConfiguration()
-            DispatchQueue.main.async { self.zoomFactor = d.videoZoomFactor }
+            do {
+                try d.lockForConfiguration()
+                let target = max(d.minAvailableVideoZoomFactor, min(z, d.maxAvailableVideoZoomFactor))
+                d.videoZoomFactor = target
+                let actual = d.videoZoomFactor
+                d.unlockForConfiguration()
+                DispatchQueue.main.async { self.zoomFactor = actual }
+            } catch {
+                DispatchQueue.main.async { self.lastError = "Zoom konnte nicht eingestellt werden: \(error.localizedDescription)" }
+            }
         }
     }
 

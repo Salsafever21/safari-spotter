@@ -34,6 +34,8 @@ führen beschädigte Fotomarkierungen oder GPS-Punkte zu einem Fehler und einem 
 verloren zu gehen. Für diesen Stand bestanden 55 Logiktests und ein UI-Test mit zwei ausgewählten Fotos im Simulator.
 Falls SwiftData beim App-Start den lokalen Speicher nicht öffnen kann, zeigt die App nun den Fehler und einen erneuten
 Versuch an, statt abzustürzen. Dabei wird der bestehende Datenspeicher nicht ersetzt oder gelöscht.
+Die Zoomsteuerung ändert das Kameraobjektiv nur nach erfolgreichem Sperren der Gerätekonfiguration; Fehler erscheinen
+als Meldung, statt eine ungesperrte Einstellung zu versuchen.
 
 ## Bauen
 
