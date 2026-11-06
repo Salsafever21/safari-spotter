@@ -84,7 +84,10 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var hintRuns: [SpeciesDecision] = []
     @Published var hint: (name: String, conf: Double, until: TimeInterval)?
     private var lastHintLog: (name: String, t: TimeInterval) = ("", 0)
+    private var storageRetryAfter: TimeInterval = 0 // nur auf `queue`: bei vollem Speicher nicht jeden Frame erneut schreiben
     private var modelContext: ModelContext?
+    /// Austauschbar im Speichertest; im Betrieb immer der echte SwiftData-Commit.
+    var saveContext: (ModelContext) throws -> Void = { try $0.save() }
     private let catalog = SpeciesCatalog.shared
     private let settings = AppSettings.shared
     private let drive = DriveRecorder.shared
@@ -536,10 +539,13 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             DispatchQueue.main.async {
                 if self.tracking && generation == self.displayGeneration { self.hint = (name, d.confidence, now + 1.8) }
             }
-            if same >= 4, d.confidence >= 0.7, !(lastHintLog.name == name && now - lastHintLog.t < 60) {
-                lastHintLog = (name, now)
+            if same >= 4, d.confidence >= 0.7, now >= storageRetryAfter,
+               !(lastHintLog.name == name && now - lastHintLog.t < 60) {
                 let thumb = pipeline.jpeg(image, rect: sq, size: 96, quality: 0.6)
-                log(name: name, key: d.key, thumb: thumb, src: "hint", image: image, size: size, generation: generation)
+                if log(name: name, key: d.key, thumb: thumb, src: "hint", image: image, size: size,
+                       generation: generation, detections: snapshotDetections()) != nil {
+                    lastHintLog = (name, now)
+                } else { storageRetryAfter = now + 5 }
             }
         }
     }
@@ -547,58 +553,99 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     // MARK: Sichtungen
 
     private func maybeLog(_ t: Track, image: CIImage, size: CGSize) {
-        guard !t.logged, let name = t.decision.name, t.decision.sure, !t.decision.other, t.hits >= 4, CACurrentMediaTime() - t.born >= 1.2, let pipeline else { return }
-        t.logged = true
+        let now = CACurrentMediaTime()
+        guard !t.logged, now >= storageRetryAfter, let name = t.decision.name, t.decision.sure,
+              !t.decision.other, t.hits >= 4, now - t.born >= 1.2, let pipeline else { return }
         let thumb = pipeline.jpeg(image, rect: VisionPipeline.cropSquare(t.box, in: size, pad: 0.08), size: 96, quality: 0.6)
-        t.sightingId = log(name: name, key: t.decision.key, thumb: thumb, src: "cam", image: image, size: size, generation: processingGeneration)
+        if let id = log(name: name, key: t.decision.key, thumb: thumb, src: "cam", image: image, size: size,
+                        generation: processingGeneration, detections: snapshotDetections()) {
+            t.sightingId = id
+            t.logged = true
+        } else { storageRetryAfter = now + 5 }
     }
 
     /// Loggt eine Sichtung (fasst gleiche Art innert 30 s zusammen) und speichert bei neuen Einträgen einen Schnappschuss
     @discardableResult
-    func log(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int = 1, noMerge: Bool = false, generation: Int? = nil) -> UUID? {
-        if Thread.isMainThread { return logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge, generation: generation) }
+    func log(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int = 1,
+             noMerge: Bool = false, generation: Int? = nil, detections: [PhotoDet] = []) -> UUID? {
+        if Thread.isMainThread { return logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size,
+                                                  count: count, noMerge: noMerge, generation: generation, detections: detections) }
         var result: UUID?
         let sem = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async { result = self.logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size, count: count, noMerge: noMerge, generation: generation); sem.signal() }
+        DispatchQueue.main.async { result = self.logOnMain(name: name, key: key, thumb: thumb, src: src, image: image, size: size,
+                                                            count: count, noMerge: noMerge, generation: generation,
+                                                            detections: detections); sem.signal() }
         sem.wait()
         return result
     }
 
     @discardableResult
-    private func logOnMain(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize, count: Int, noMerge: Bool, generation: Int? = nil) -> UUID? {
+    private func logOnMain(name: String, key: String?, thumb: Data?, src: String, image: CIImage?, size: CGSize,
+                           count: Int, noMerge: Bool, generation: Int? = nil, detections: [PhotoDet] = []) -> UUID? {
         if let generation, (!tracking || generation != displayGeneration) { return nil }
         guard let ctx = self.modelContext else { return nil }
         if !noMerge, let last = self.lastLoggedSpecies, last.name == name, Date().timeIntervalSince(last.t) < 30,
            let existing = SightingStore(context: ctx, catalog: catalog).sighting(id: last.id) {
+            let oldCount = existing.n, oldTime = existing.t, oldThumb = existing.thumb
             existing.n += count; existing.t = .now; if existing.thumb == nil { existing.thumb = thumb }
-            try? ctx.save()
+            do { try saveContext(ctx) }
+            catch {
+                existing.n = oldCount; existing.t = oldTime; existing.thumb = oldThumb
+                lastError = "Sichtung konnte nicht gespeichert werden: \(error.localizedDescription)"
+                return nil
+            }
             recorder.noteSighting(id: existing.id, name: name)
             self.lastLoggedSpecies = (name, .now, existing.id); return existing.id
         }
         let sensitive = self.catalog.isSensitive(name: name)
         let pos = self.drive.lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < 180 ? Position.from($0, sensitive: sensitive) : nil }
         let s = Sighting(name: name, key: key, n: count, position: pos, thumb: thumb, src: src)
-        ctx.insert(s); try? ctx.save()
+        ctx.insert(s)
+        do { try saveContext(ctx) }
+        catch {
+            ctx.delete(s)
+            lastError = "Sichtung konnte nicht gespeichert werden: \(error.localizedDescription)"
+            return nil
+        }
         recorder.noteSighting(id: s.id, name: name)   // verknüpft die Sichtung mit einem laufenden Clip
         self.lastLoggedSpecies = (name, .now, s.id)
-        if self.settings.snapshots, let image, let pipeline = self.pipeline { self.snapshot(image: image, size: size, names: [name], sightingIds: [s.id], pipeline: pipeline, ctx: ctx) }
+        if self.settings.snapshots, let image, let pipeline = self.pipeline {
+            self.snapshot(image: image, size: size, names: [name], sightingIds: [s.id], detections: detections,
+                          pipeline: pipeline, ctx: ctx)
+        }
         return s.id
     }
 
     /// Schnappschuss des Kamerabilds (max. 1280 px) mit den Rahmen, wie snapshotFrame() im Web
-    private func snapshot(image: CIImage, size: CGSize, names: [String], sightingIds: [UUID], pipeline: VisionPipeline, ctx: ModelContext) {
+    private func snapshotDetections() -> [PhotoDet] {
+        tracker.tracks.filter { $0.isShown }.map { t in
+            PhotoDet(x: t.box.minX, y: t.box.minY, w: t.box.width, h: t.box.height,
+                     name: t.decision.name, conf: t.decision.confidence, sure: t.decision.sure)
+        }
+    }
+
+    private func snapshot(image: CIImage, size: CGSize, names: [String], sightingIds: [UUID], detections: [PhotoDet],
+                          pipeline: VisionPipeline, ctx: ModelContext) {
         let k = min(1, 1280 / max(size.width, size.height))
         let scaled = image.transformed(by: CGAffineTransform(scaleX: k, y: k))
         let ciCtx = CIContext()
         guard let jpeg = ciCtx.jpegRepresentation(of: scaled, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.8]) else { return }
-        let dets = tracker.tracks.filter { $0.isShown }.map { t in PhotoDet(x: t.box.minX * k, y: t.box.minY * k, w: t.box.width * k, h: t.box.height * k, name: t.decision.name, conf: t.decision.confidence, sure: t.decision.sure) }
+        let factor = Double(k)
+        let dets = detections.map { PhotoDet(x: $0.x * factor, y: $0.y * factor, w: $0.w * factor, h: $0.h * factor,
+                                           name: $0.name, conf: $0.conf, sure: $0.sure) }
         // Artenschutz: das Foto wird ungenau, sobald irgendein Tier im Bild sensibel ist, nicht nur das gerade geloggte
         let sensitive = LocationProtection.containsSensitive(names.map { $0 as String? } + dets.map { $0.name }, isSensitive: { self.catalog.isSensitive(name: $0) })
         let pos = drive.lastFix.map { Position.from($0, sensitive: sensitive) }
         let side = min(scaled.extent.width, scaled.extent.height)
         let thumb = pipeline.jpeg(scaled, rect: CGRect(x: (scaled.extent.width - side) / 2, y: (scaled.extent.height - side) / 2, width: side, height: side), size: 160, quality: 0.7)
-        ctx.insert(PhotoItem(t: .now, kind: "auto", species: names, dets: dets, image: jpeg, thumb: thumb, width: Int(scaled.extent.width), height: Int(scaled.extent.height), position: pos, sightingIds: sightingIds))
-        try? ctx.save()
+        let photo = PhotoItem(t: .now, kind: "auto", species: names, dets: dets, image: jpeg, thumb: thumb,
+                              width: Int(scaled.extent.width), height: Int(scaled.extent.height), position: pos, sightingIds: sightingIds)
+        ctx.insert(photo)
+        do { try saveContext(ctx) }
+        catch {
+            ctx.delete(photo)
+            lastError = "Schnappschuss konnte nicht gespeichert werden: \(error.localizedDescription)"
+        }
     }
 
     /// Unsichere, stabile Treffer in die Prüfliste (30 bis 70 %)
@@ -608,7 +655,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         DispatchQueue.main.async {
             guard self.tracking, generation == self.displayGeneration else { return }
             guard let ctx = self.modelContext else { return }
-            ctx.insert(Correction(image: jpeg, predicted: name, predKey: d.key, conf: d.confidence, status: "review", region: region?.key)); try? ctx.save()
+            let review = Correction(image: jpeg, predicted: name, predKey: d.key, conf: d.confidence, status: "review", region: region?.key)
+            ctx.insert(review)
+            do { try self.saveContext(ctx) }
+            catch {
+                ctx.delete(review)
+                self.lastError = "Prüfliste konnte nicht gespeichert werden: \(error.localizedDescription)"
+                self.queue.async { t.collected = false }
+            }
         }
     }
 

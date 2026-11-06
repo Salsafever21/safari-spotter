@@ -13,6 +13,9 @@ Build 3 ergänzt einen manuellen Foto-Auslöser und die Objektivwahl. Das Foto w
 App-Speicher gesichert, damit ein Abbruch der Analyse die Aufnahme nicht verliert. Die iOS-Sicherung enthält diese Fotos.
 Build 4 verhindert, dass ein verspätetes Erkennungsergebnis nach dem Ausschalten des Trackings Status oder Rahmen erneut
 einblendet. Beim Ausschalten werden die sichtbaren Treffer sofort entfernt; Ergebnisse des vorherigen Laufs werden verworfen.
+Nach Build 7 prüft die Kamera-Speicherung Commit-Fehler: fehlgeschlagene Sichtungen gelten nicht als erfasst, der Track kann
+nach einer kurzen Pause erneut gespeichert werden, und Speicherausfälle für Schnappschüsse und Prüfliste werden angezeigt.
+Die Fotomarkierungen werden vor dem Wechsel auf den Hauptthread kopiert, statt den Tracker gleichzeitig auszulesen.
 
 ## Bauen
 
