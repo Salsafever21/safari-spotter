@@ -20,7 +20,7 @@ if (all.length !== items.length * dim) throw new Error('Embedding-Datei passt ni
 // Split nach Beobachtung (alle Varianten eines Fotos landen auf derselben Seite), 15 % Validierung
 function hash(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
 const trainIdx = [], valIdx = [];
-items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (hash(it.file) < 0.15 ? valIdx : trainIdx).push(i); });
+items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (hash(it.obs || it.file) < 0.15 ? valIdx : trainIdx).push(i); });
 // Validierung nur mit der ungespiegelten Vollbild-Variante (Variante 0), damit die Zahl realistisch bleibt
 const valIdx0 = valIdx.filter((i) => items[i].variant === 0);
 

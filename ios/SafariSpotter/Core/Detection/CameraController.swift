@@ -547,7 +547,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             }
             if same >= 4, d.confidence >= 0.7, now >= storageRetryAfter,
                !(lastHintLog.name == name && now - lastHintLog.t < 60) {
-                let thumb = pipeline.jpeg(image, rect: sq, size: 96, quality: 0.6)
+                let thumb = pipeline.jpeg(image, rect: sq, size: 224, quality: 0.8)
                 if log(name: name, key: d.key, thumb: thumb, src: "hint", image: image, size: size,
                        generation: generation, detections: snapshotDetections()) != nil {
                     lastHintLog = (name, now)
@@ -562,7 +562,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let now = CACurrentMediaTime()
         guard !t.logged, now >= storageRetryAfter, let name = t.decision.name, t.decision.sure,
               !t.decision.other, t.hits >= 4, now - t.born >= 1.2, let pipeline else { return }
-        let thumb = pipeline.jpeg(image, rect: VisionPipeline.cropSquare(t.box, in: size, pad: 0.08), size: 96, quality: 0.6)
+        let thumb = pipeline.jpeg(image, rect: VisionPipeline.cropSquare(t.box, in: size, pad: 0.08), size: 224, quality: 0.8)
         if let id = log(name: name, key: t.decision.key, thumb: thumb, src: "cam", image: image, size: size,
                         generation: processingGeneration, detections: snapshotDetections()) {
             t.sightingId = id

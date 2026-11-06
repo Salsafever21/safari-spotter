@@ -32,7 +32,11 @@ node train.js                  # Kopf trainieren, Bericht in report.json, Export
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
 Der Korrekturimport nimmt nur bestätigte oder korrigierte Bilder mit eindeutigem Artschlüssel auf, entfernt Bildmetadaten,
-überspringt Duplikate und widersprüchliche Beschriftungen und schreibt die übernommenen Bilder ebenfalls nur nach `training/data/`.
+verwirft Ausschnitte unter 160 px, erkennt Web- und iOS-Exporte desselben Original-JPEGs als Duplikat und übernimmt bei
+mehrfach korrigierter Art nur die neueste geprüfte Bezeichnung. Ältere Dateien bleiben zur Kontrolle erhalten, werden aber
+vom Training ausgeschlossen. Alle Bilder bleiben in `training/data/`; dort zählen sie nicht gegen die iNaturalist-Downloadquote.
+Die Validierung trennt Bilder nach Beobachtung bzw. Original-JPEG. Ähnliche Bilder aus verschiedenen Aufnahmen können
+weiterhin auf beiden Seiten liegen, deshalb bleibt ein unabhängiger Feldtest nötig.
 Ein Export trainiert das Modell nicht automatisch: Nach dem Import müssen `embed.js`, `train.js` und für iOS die
 Core-ML-Konvertierung aus `ios/README.md` erneut laufen. Die lokale Testmenge allein belegt keine Erkennungsqualität im Feld.
 

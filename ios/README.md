@@ -51,6 +51,9 @@ Freigabe erhält eine eigene Datei, damit Änderungen an der Prüfliste eine ber
 Schreibfehler erscheinen in der App. Die exportierten Bildausschnitte werden ohne EXIF- und GPS-Metadaten neu kodiert.
 Die temporäre Datei wird erst nach Abschluss oder Abbruch der Teilen-Aktion entfernt;
 liegengebliebene Exportdateien, die älter als eine Stunde sind, werden beim nächsten Export bereinigt.
+Neue Kamera-Sichtungen speichern für spätere Artkorrekturen einen 224-px-Ausschnitt statt eines 96-px-Vorschaubilds.
+Der Export enthält einen Hash des ursprünglichen JPEGs, damit ein zuvor aus der Web-App übernommenes Bild beim lokalen
+Training nicht ein zweites Mal gezählt wird. Ältere 96-px-Korrekturen bleiben in der App, der Trainingsimport verwirft sie.
 
 ## Bauen
 

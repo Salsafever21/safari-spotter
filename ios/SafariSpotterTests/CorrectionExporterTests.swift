@@ -1,6 +1,7 @@
 import XCTest
 import UIKit
 import CoreLocation
+import CryptoKit
 @testable import SafariSpotter
 
 @MainActor
@@ -29,6 +30,9 @@ final class CorrectionExporterTests: XCTestCase {
         XCTAssertNotNil(UIImage(data: exportedImage))
         XCTAssertEqual(firstItem["predicted"] as? String, "Löwe")
         XCTAssertEqual(firstItem["region"] as? String, "kruger")
+        let originalHash = SHA256.hash(data: image).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(firstItem["sourceJPEGHash"] as? String, originalHash)
+        XCTAssertEqual(secondItem["sourceJPEGHash"] as? String, originalHash)
     }
 
     func testEmptyExportIsRejected() throws {

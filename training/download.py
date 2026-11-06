@@ -110,7 +110,8 @@ def main():
         key = c['key']
         cdir = os.path.join(args.out, key)
         os.makedirs(cdir, exist_ok=True)
-        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg')])
+        # User corrections are additional examples, not a replacement for licensed iNaturalist photos.
+        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()])
         if have >= args.per_class * 0.9:
             print(f'{key:22s} schon {have} Bilder, übersprungen'); continue
         try:
@@ -134,7 +135,7 @@ def main():
         with open(manifest_temp, 'w') as output:
             json.dump(manifest, output, ensure_ascii=False)
         os.replace(manifest_temp, manifest_path)
-        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg')])
+        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()])
         print(f'{key:22s} taxon {tid} ({tname}, {n_obs} Beob.)  gelistet {len(items):3d}  geladen {ok:3d}  total {total:3d}', flush=True)
     pool.shutdown()
 

@@ -4,6 +4,7 @@ import Photos
 import ImageIO
 import CoreImage
 import UniformTypeIdentifiers
+import CryptoKit
 
 /// Exporte mit Artenschutz: Nashorn-Sichtungen nur mit 10-km-Raster und auf die Stunde gerundeter Zeit, Spur ±15 min ausgeblendet.
 enum Exporters {
@@ -72,13 +73,17 @@ enum CorrectionExporter {
         guard !corrections.isEmpty else { throw ExportError.empty }
         let items: [[String: Any]] = try corrections.map { c in
             ["img": "data:image/jpeg;base64," + (try jpegWithoutMetadata(c.image)).base64EncodedString(),
+             // Links an iOS export to the same original JPEG in a web export without exposing that JPEG.
+             "sourceJPEGHash": SHA256.hash(data: c.image).map { String(format: "%02x", $0) }.joined(),
              "predicted": c.predicted ?? NSNull(), "predKey": c.predKey ?? NSNull(),
              "conf": c.conf ?? NSNull(), "label": c.label ?? NSNull(),
              "labelKey": c.labelKey ?? NSNull(), "status": c.status,
              "t": c.t.timeIntervalSince1970 * 1000, "region": c.region ?? NSNull()]
         }
+        let exportedAt = ISO8601DateFormatter()
+        exportedAt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let payload: [String: Any] = ["app": "Safari Spotter iOS",
-                                      "exported": ISO8601DateFormatter().string(from: .now),
+                                      "exported": exportedAt.string(from: .now),
                                       "items": items]
         let data = try JSONSerialization.data(withJSONObject: payload)
         let url = directory.appendingPathComponent("\(prefix)\(UUID().uuidString).json")

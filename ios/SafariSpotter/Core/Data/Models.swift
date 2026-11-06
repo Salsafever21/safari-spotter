@@ -14,7 +14,7 @@ final class Sighting {
     var lon: Double?
     var acc: Double?
     var coarse: Bool
-    var thumb: Data?
+    var thumb: Data?          // 224-px-Ausschnitt bei neuen Kamera-Sichtungen; ältere Einträge können kleiner sein
     var src: String   // cam | hint | photo | manual
 
     init(name: String, key: String?, t: Date = .now, n: Int = 1, position: Position? = nil, thumb: Data? = nil, src: String = "cam") {

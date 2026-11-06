@@ -55,7 +55,7 @@ function variants(img) {
     // A correction image is usable only after its label has been committed to manifest.json.
     // This also ignores an orphaned JPEG if an import was interrupted before the manifest write.
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jpg') &&
-      (!f.startsWith('correction-') || manifest[c.key + '/' + f])).sort();
+      (!f.startsWith('correction-') || (manifest[c.key + '/' + f] && !manifest[c.key + '/' + f].superseded))).sort();
     let okFiles = 0;
     for (const f of files) {
       let img;
