@@ -57,6 +57,13 @@ Verifiziert am 6. November 2026 mit Xcode 27.2: 114 Tests im Simulator, 111 eige
 mit der Web-Logik bestanden; das signierte iOS-Release-Archiv baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
+Build 10 ist seit 7. November 2026 in der internen TestFlight-Gruppe **Safari Spotter intern** verfügbar.
+Das Feldjournal gestaltet Reiseeinstieg, Kamera und Galerie neu. Unter **Sichtungen → Spottings** zählt
+das Sammelalbum die gespeicherten Sichtungen über alle Tage hinweg. Löwe und Löwin zählen als dieselbe Art.
+Gruppen mit mehreren möglichen Arten bleiben in der Sichtungsliste und zählen nach der Artbestimmung zum Album.
+118 Simulator-Tests und 111 eigenständige Swift-Prüfungen bestanden. Der Spottings-Oberflächentest bestand
+auch auf dem finalen Quellstand und prüft bestehende Sichtungen, Lebensraumfilter, Artenkarte und Galerie.
+
 Stand 7. November 2026: Xcode 27.2 baut die App für Simulator und iPhone. Build 9 wurde am 6. November um 19:02 Uhr MEZ
 zu App Store Connect hochgeladen und ist in TestFlight für die Gruppe **Safari Spotter intern** verfügbar. App Store Connect
 bestätigt für Version 1.0.0 (9) den Status **Im Test**. Build 8 enthält weitere Datenschutz-, Speicher- und Fotoexport-Verbesserungen.
