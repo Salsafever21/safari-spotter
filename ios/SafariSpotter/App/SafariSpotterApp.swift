@@ -1,30 +1,80 @@
 import SwiftUI
 import SwiftData
+import AuthenticationServices
 
 @main
 struct SafariSpotterApp: App {
     // SwiftData-Container für Sichtungen, Fotos, Korrekturen und Game Drives
-    let container: ModelContainer = {
-        do {
-            return try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self)
-        } catch {
-            fatalError("SwiftData konnte nicht gestartet werden: \(error)")
-        }
-    }()
+    @State private var storage = StorageLaunch.open()
 
     @StateObject private var catalog = SpeciesCatalog.shared
     @StateObject private var drive = DriveRecorder.shared
     @StateObject private var settings = AppSettings.shared
+    @StateObject private var account = AppleAccountSession()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            LiveView()
-                .environmentObject(catalog)
-                .environmentObject(drive)
-                .environmentObject(settings)
-                .preferredColorScheme(.dark)
+            Group {
+                switch storage {
+                case .ready(let container):
+                    Group {
+                        if settings.onboardingComplete { LiveView() }
+                        else { TravelSetupView(firstLaunch: true) }
+                    }
+                        .environmentObject(catalog)
+                        .environmentObject(drive)
+                        .environmentObject(settings)
+                        .environmentObject(account)
+                        .modelContainer(container)
+                case .failed(let message):
+                    StorageFailureView(message: message) { storage = StorageLaunch.open() }
+                }
+            }
+            .task(id: scenePhase) {
+                if scenePhase == .active { await account.refresh() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
+                Task { await account.refresh() }
+            }
         }
-        .modelContainer(container)
+    }
+}
+
+private enum StorageLaunch {
+    case ready(ModelContainer)
+    case failed(String)
+
+    static func open() -> StorageLaunch {
+        do {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["SAFARI_SPOTTER_UI_FIXTURE"] == "drive-history" {
+                return .ready(try DriveHistoryFixture.make())
+            }
+            if ProcessInfo.processInfo.environment["SAFARI_SPOTTER_UI_FIXTURE"] == "photo-export-failure" {
+                return .ready(try DriveHistoryFixture.make(corruptPhoto: true))
+            }
+            #endif
+            return .ready(try ModelContainer(for: Sighting.self, PhotoItem.self, Correction.self, Drive.self))
+        }
+        catch { return .failed(error.localizedDescription) }
+    }
+}
+
+private struct StorageFailureView: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "externaldrive.badge.exclamationmark").font(.largeTitle)
+            Text("Gespeicherte Daten können nicht geöffnet werden").font(.headline).multilineTextAlignment(.center)
+            Text("Bitte Safari Spotter nicht löschen. Die App entfernt bei diesem Fehler keine Aufnahmen. Prüfe den freien Speicher und versuche es erneut.")
+                .multilineTextAlignment(.center)
+            Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Button("Erneut versuchen", action: retry).buttonStyle(.borderedProminent)
+        }
+        .padding(24)
     }
 }
 
@@ -41,6 +91,11 @@ final class AppSettings: ObservableObject {
     @Published var snapshots: Bool { didSet { d.set(snapshots, forKey: "snapshots") } }
     @Published var autoTrack: Bool { didSet { d.set(autoTrack, forKey: "autoTrack") } }
     @Published var res: String { didSet { d.set(res, forKey: "res") } }          // 720 | 1080 | 2160
+    @Published var lensID: String { didSet { d.set(lensID, forKey: "lensID") } }
+    @Published var burnIn: Bool { didSet { d.set(burnIn, forKey: "burnIn") } }  // Rahmen ins Video einbrennen (wie settings.burnIn im Web)
+    @Published var originCountry: String { didSet { d.set(originCountry, forKey: "originCountry") } }
+    @Published var destinationCountry: String { didSet { d.set(destinationCountry, forKey: "destinationCountry") } }
+    @Published var onboardingComplete: Bool { didSet { d.set(onboardingComplete, forKey: "onboardingComplete") } }
     private init() {
         threshold = d.object(forKey: "threshold") as? Double ?? 0.4
         labels = d.object(forKey: "labels") as? Bool ?? true
@@ -51,5 +106,10 @@ final class AppSettings: ObservableObject {
         snapshots = d.object(forKey: "snapshots") as? Bool ?? true
         autoTrack = d.object(forKey: "autoTrack") as? Bool ?? false
         res = d.string(forKey: "res") ?? "2160"
+        lensID = d.string(forKey: "lensID") ?? ""
+        burnIn = d.object(forKey: "burnIn") as? Bool ?? true
+        originCountry = d.string(forKey: "originCountry") ?? ""
+        destinationCountry = d.string(forKey: "destinationCountry") ?? ""
+        onboardingComplete = d.bool(forKey: "onboardingComplete")
     }
 }

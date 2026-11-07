@@ -23,16 +23,35 @@ Statische Seite, keine Build-Schritte: `index.html`, `sw.js`, `manifest.webmanif
 ## Artenmodell neu trainieren
 
 ```
-cd training && npm install
-python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY/CC-BY-NC), Liste in species.json
-node embed.js                  # MobileNet-Embeddings mit demselben Graph wie im Browser
-node train.js                  # Kopf trainieren, Bericht in report.json, Export nach ../models/head/<version>/
+cd training && ./setup_node_mac.sh  # Apple-Silicon-Mac: TensorFlow auch bei Leerzeichen im Projektpfad
+python3 download.py            # Fotos von iNaturalist (research grade, CC0/CC-BY), Liste in species.json
+python3 import_corrections.py /Pfad/zu/korrekturen.json  # optional: geprüfte Ausschnitte aus der App (Pillow nötig)
+./node22.sh embed.js          # MobileNet-Embeddings mit demselben Graph wie im Browser
+HEAD_VERSION=1.2.2-candidate ./node22.sh train.js  # neuer Kandidat samt Bericht unter ../models/head/<version>/
 ```
 
 Neue Art: Eintrag in `training/species.json` (Anzeigename, optional Gruppe, iNaturalist-Taxon), dann die drei Schritte ausführen und `HEAD_DIR` in `index.html` auf die neue Version zeigen lassen. Die Fotos selbst bleiben lokal (`training/data/` ist nicht im Repo), die Lizenz- und Urheberangaben stehen in `training/data/manifest.json`.
+Der Korrekturimport nimmt nur bestätigte oder korrigierte Bilder mit eindeutigem Artschlüssel auf, entfernt Bildmetadaten,
+verwirft Ausschnitte unter 160 px, erkennt Web- und iOS-Exporte desselben Original-JPEGs als Duplikat und übernimmt bei
+mehrfach korrigierter Art nur die neueste geprüfte Bezeichnung. Ältere Dateien bleiben zur Kontrolle erhalten, werden aber
+vom Training ausgeschlossen. Alle Bilder bleiben in `training/data/`; dort zählen sie nicht gegen die iNaturalist-Downloadquote.
+Die Validierung trennt Bilder nach Beobachtung bzw. Original-JPEG. Ähnliche Bilder aus verschiedenen Aufnahmen können
+weiterhin auf beiden Seiten liegen, deshalb bleibt ein unabhängiger Feldtest nötig.
+`train.js` verlangt mindestens 20 Trainings- und 3 Validierungsfotos pro Art sowie eine neue `HEAD_VERSION` und
+überschreibt vorhandene Modellversionen nicht. Der bisherige Artenkopf bleibt dadurch bis zu einer ausdrücklichen
+Qualitätsprüfung erhalten.
+Foto- und Manifest-Prüfsummen im Embedding-Index verhindern, dass ein später ausgeschlossenes oder geändertes Foto
+unbemerkt in einem neuen Artenkopf bleibt; nach jeder Datenänderung müssen die Embeddings neu erzeugt werden.
+Ein Export trainiert das Modell nicht automatisch: Nach dem Import müssen `embed.js`, `train.js` und für iOS die
+Core-ML-Konvertierung aus `ios/README.md` erneut laufen. Die lokale Testmenge allein belegt keine Erkennungsqualität im Feld.
 
 ## Native iOS-App
 
 `ios/` enthält die Vorbereitung für eine echte iOS-App mit denselben Funktionen: beide Modelle als Core ML (`ios/Models/`, Konvertierung in `training/coreml/`), ein SwiftUI-Projekt (`xcodegen generate` in `ios/`) und ein Abgleich der Swift-Logik mit `app.js` (`ios/Tools/logic-check/run.sh`). Der eigene Ein-Modell-Detektor (YOLO) ist in `training/yolo/` vorbereitet. Details in `ios/README.md`.
+
+Die native App hat ein Reise-Onboarding mit Ausgangsland und Reiseziel. Zehn Länderprofile aus offiziellen Park- und
+Naturschutzquellen geben der Erkennung ein schwaches Vorwissen für beide Länder; andere Arten bleiben erkennbar. Ein Tierführer zeigt die
+im Modell enthaltenen Tiere nach Boden, Luft und Wasser. Die Auswahl nach einzelnen Parks und Reservaten folgt später.
+Reiseauswahl, Sichtungen und Fotos sind in der nativen Sicherung enthalten.
 
 Version: 1.5.3 (Web), iOS-Vorbereitung 1.0.0

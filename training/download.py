@@ -4,20 +4,24 @@
 Aufruf: python3 download.py [--per-class 220] [--out data]
 Legt data/<key>/<photo_id>.jpg an und data/manifest.json mit Lizenz- und Urheberangaben.
 """
-import argparse, json, os, sys, time, random, concurrent.futures as cf
+import argparse, gzip, json, os, sys, time, random, concurrent.futures as cf
 import urllib.request, urllib.parse, urllib.error
 
 API = 'https://api.inaturalist.org/v1'
-UA = {'User-Agent': 'SafariSpotter/1.1 training-data (sandro.alves@bluewin.ch)'}
-LICENSES = 'cc0,cc-by,cc-by-nc'
+UA = {'User-Agent': 'SafariSpotter/1.1 training-data (sandro.alves@bluewin.ch)', 'Accept-Encoding': 'gzip'}
+ALLOWED_LICENSES = {'cc0', 'cc-by'}
+LICENSES = ','.join(sorted(ALLOWED_LICENSES))
 
 
 def get_json(url, retries=4):
     for i in range(retries):
         try:
             req = urllib.request.Request(url, headers=UA)
-            with urllib.request.urlopen(req, timeout=60) as r:
-                return json.load(r)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                payload = r.read()
+                if r.headers.get('Content-Encoding') == 'gzip':
+                    payload = gzip.decompress(payload)
+                return json.loads(payload)
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 time.sleep(10 * (i + 1)); continue
@@ -41,7 +45,7 @@ def list_photos(taxon_id, want, sex=None):
     """Sammelt (photo_id, medium_url, license, attribution, obs_id) bis 'want' erreicht ist, max. 1 Foto pro Beobachtung."""
     out, seen_obs, page = [], set(), 1
     params = {'taxon_id': taxon_id, 'quality_grade': 'research', 'photos': 'true', 'photo_license': LICENSES,
-              'per_page': 200, 'order_by': 'votes', 'order': 'desc'}
+              'per_page': min(100, max(20, want)), 'order_by': 'votes', 'order': 'desc'}
     if sex:
         params['term_id'] = 9; params['term_value_id'] = sex
     while len(out) < want and page <= 6:
@@ -56,7 +60,7 @@ def list_photos(taxon_id, want, sex=None):
             seen_obs.add(o['id'])
             for p in o.get('photos', [])[:1]:
                 lic = p.get('license_code')
-                if not lic or 'nd' in lic or 'sa' in lic:
+                if lic not in ALLOWED_LICENSES:
                     continue
                 url = p['url'].replace('/square.', '/medium.')
                 out.append({'photo_id': p['id'], 'url': url, 'license': lic, 'attribution': p.get('attribution', ''), 'obs': o['id']})
@@ -75,8 +79,10 @@ def fetch(item, dest):
                 data = r.read()
             if len(data) < 2000 or data[:2] != b'\xff\xd8':
                 return False
-            with open(dest, 'wb') as f:
+            temp = dest + '.part'
+            with open(temp, 'wb') as f:
                 f.write(data)
+            os.replace(temp, dest)
             return True
         except Exception:
             time.sleep(1.5 * (i + 1))
@@ -99,18 +105,28 @@ def main():
     manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
 
     pool = cf.ThreadPoolExecutor(max_workers=8)
+    consecutive_api_failures = 0
     for c in classes:
         key = c['key']
         cdir = os.path.join(args.out, key)
         os.makedirs(cdir, exist_ok=True)
-        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg')])
+        # User corrections are additional examples, not a replacement for licensed iNaturalist photos.
+        # Count only photos already committed to the manifest. A stopped download can leave
+        # complete JPEGs on disk before the class manifest is written; the next run must revisit them.
+        have = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()
+                    and f"{key}/{f}" in manifest])
         if have >= args.per_class * 0.9:
             print(f'{key:22s} schon {have} Bilder, übersprungen'); continue
         try:
             tid, tname, n_obs = resolve_taxon(c['taxon'])
+            items = list_photos(tid, int(args.per_class * 1.15), c.get('sex'))
+            consecutive_api_failures = 0
         except Exception as e:
-            print(f'{key:22s} TAXON-FEHLER {e}'); continue
-        items = list_photos(tid, int(args.per_class * 1.15), c.get('sex'))
+            consecutive_api_failures += 1
+            print(f'{key:22s} API-FEHLER {e}', flush=True)
+            if consecutive_api_failures >= 3:
+                raise RuntimeError('iNaturalist ist wiederholt nicht erreichbar; Download später fortsetzen') from e
+            continue
         futs = {pool.submit(fetch, it, os.path.join(cdir, f"{it['photo_id']}.jpg")): it for it in items}
         ok = 0
         for fu in cf.as_completed(futs):
@@ -118,8 +134,12 @@ def main():
             if fu.result():
                 ok += 1
                 manifest[f"{key}/{it['photo_id']}.jpg"] = {'license': it['license'], 'attribution': it['attribution'], 'observation': it['obs'], 'taxon': tname}
-        json.dump(manifest, open(manifest_path, 'w'), ensure_ascii=False)
-        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg')])
+        manifest_temp = manifest_path + '.part'
+        with open(manifest_temp, 'w') as output:
+            json.dump(manifest, output, ensure_ascii=False)
+        os.replace(manifest_temp, manifest_path)
+        total = len([f for f in os.listdir(cdir) if f.endswith('.jpg') and f[:-4].isdigit()
+                     and f"{key}/{f}" in manifest])
         print(f'{key:22s} taxon {tid} ({tname}, {n_obs} Beob.)  gelistet {len(items):3d}  geladen {ok:3d}  total {total:3d}', flush=True)
     pool.shutdown()
 
