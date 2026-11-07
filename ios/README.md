@@ -57,6 +57,12 @@ Verifiziert am 6. November 2026 mit Xcode 27.2: 114 Tests im Simulator, 111 eige
 mit der Web-Logik bestanden; das signierte iOS-Release-Archiv baut erfolgreich. Die neue Fahrtenhistorie wurde mit zwei
 getrennten Fahrten in einem ausschliesslich im Arbeitsspeicher angelegten UI-Testdatensatz geprüft.
 
+Build 11 ist in der internen TestFlight-Gruppe **Safari Spotter intern** verfügbar.
+Unter **Einstellungen → Konto** gibt es die freiwillige Anmeldung mit Apple, einen bearbeitbaren Anzeigenamen,
+Abmelden und das Entfernen des lokalen Profils. Profil und Anmeldestatus liegen im Schlüsselbund dieses iPhones.
+Sichtungen, Fotos, Videos und verschlüsselte Sicherungen sind vom Profil getrennt. Die App bleibt ohne Anmeldung
+nutzbar. 124 Simulator-Tests bestanden, einschliesslich Gastzugang mit bestehenden Sichtungen und Backup-Wiederherstellung.
+
 Build 10 ist seit 7. November 2026 in der internen TestFlight-Gruppe **Safari Spotter intern** verfügbar.
 Das Feldjournal gestaltet Reiseeinstieg, Kamera und Galerie neu. Unter **Sichtungen → Spottings** zählt
 das Sammelalbum die gespeicherten Sichtungen über alle Tage hinweg. Löwe und Löwin zählen als dieselbe Art.
