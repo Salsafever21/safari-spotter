@@ -27,7 +27,6 @@ struct SafariSpotterApp: App {
                     StorageFailureView(message: message) { storage = StorageLaunch.open() }
                 }
             }
-            .preferredColorScheme(.dark)
         }
     }
 }

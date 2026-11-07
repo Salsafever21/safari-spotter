@@ -8,6 +8,7 @@ import Combine
 struct SightingsView: View {
     @ObservedObject var camera: CameraController
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var catalog: SpeciesCatalog
     @EnvironmentObject private var drive: DriveRecorder
     @EnvironmentObject private var settings: AppSettings
@@ -16,6 +17,8 @@ struct SightingsView: View {
     @Query(sort: \Drive.startedAt, order: .reverse) private var drives: [Drive]
     @Query(filter: #Predicate<Correction> { $0.status == "review" }) private var reviews: [Correction]
     @State private var tab = 0
+    @State private var journalPath: [JournalRoute] = []
+    @State private var journalSpecies: (id: String, name: String)?
     @State private var historyFilter = SightingHistoryFilter()
     @State private var referenceDate = Date.now
     @State private var csvShare: SightingCSVShare?
@@ -28,7 +31,7 @@ struct SightingsView: View {
     @ObservedObject private var clipLibrary = ClipLibrary.shared
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $journalPath) {
             VStack(spacing: 0) {
                 Picker("", selection: $tab) {
                     Text("Liste").tag(0); Text("Zählung").tag(1); Text("Karte").tag(2); Text("Galerie \(photos.count + clipLibrary.clips.count)").tag(3); Text("Prüfen \(reviews.count)").tag(4)
@@ -40,6 +43,27 @@ struct SightingsView: View {
                 case 2: mapTab
                 case 3: GalleryView(photos: photos, catalog: catalog)
                 default: ReviewView(reviews: reviews)
+                }
+            }
+            .background(JournalStyle.paper.ignoresSafeArea())
+            .navigationDestination(for: JournalRoute.self) { route in
+                SpottingsView(route: route) { entry in
+                    resetFilter()
+                    journalSpecies = (entry.id, entry.name)
+                    tab = 0
+                    journalPath.removeAll()
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Sichtungen schliessen")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: JournalRoute.spottings) {
+                        Text("Spottings").font(JournalStyle.label)
+                    }
+                    .accessibilityIdentifier("open-spottings")
                 }
             }
             .navigationTitle("Sichtungen")
@@ -77,6 +101,8 @@ struct SightingsView: View {
                 Button("OK") {}
             } message: { Text(storageError ?? "") }
         }
+        .preferredColorScheme(.light)
+        .tint(JournalStyle.forest)
     }
 
     private func commit(_ action: String) {
@@ -87,12 +113,21 @@ struct SightingsView: View {
         }
     }
 
-    private var filteredSightings: [Sighting] { historyFilter.apply(to: sightings, now: referenceDate) }
+    private var historySightings: [Sighting] {
+        guard let journalSpecies else { return sightings }
+        return Spottings(sightings: sightings, catalog: catalog).entries.first { $0.id == journalSpecies.id }?.sightings ?? []
+    }
+    private var filteredSightings: [Sighting] { historyFilter.apply(to: historySightings, now: referenceDate) }
     private var counts: [(String, Int)] { SightingHistoryFilter.counts(filteredSightings).map { ($0.name, $0.count) } }
-    private var shareText: String { historyFilter.shareText(sightings: sightings, now: referenceDate) }
+    private var shareText: String { historyFilter.shareText(sightings: historySightings, now: referenceDate) }
 
     private var filterBar: some View {
         VStack(spacing: 8) {
+            if let journalSpecies {
+                Text("Spottings · \(journalSpecies.name)").font(JournalStyle.label)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("spottings-active-species")
+            }
             Picker("Zeitraum", selection: $historyFilter.scope) {
                 ForEach(SightingDateScope.allCases) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented)
@@ -114,7 +149,7 @@ struct SightingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("sighting-filter-summary")
                 Spacer()
-                if historyFilter.scope != .all || !historyFilter.query.isEmpty {
+                if journalSpecies != nil || historyFilter.scope != .all || !historyFilter.query.isEmpty {
                     Button("Alle anzeigen", action: resetFilter).font(.caption)
                         .accessibilityIdentifier("sighting-filter-reset")
                 }
@@ -122,7 +157,11 @@ struct SightingsView: View {
         }.padding(.horizontal).padding(.bottom, 8)
     }
 
-    private func resetFilter() { historyFilter.scope = .all; historyFilter.query = ""; searchFocused = false }
+    private func resetFilter() {
+        journalSpecies = nil
+        historyFilter = SightingHistoryFilter()
+        searchFocused = false
+    }
 
     // MARK: Liste
     private var list: some View {
@@ -141,11 +180,12 @@ struct SightingsView: View {
                 ShareLink(item: shareText) { Label("Ausgewählte Liste teilen", systemImage: "square.and.arrow.up") }
                     .disabled(filteredSightings.isEmpty)
                 Button("Sichtung für heute eintragen") {
-                    historyFilter.scope = .today; historyFilter.query = ""
+                    resetFilter()
+                    historyFilter.scope = .today
                     referenceDate = .now
                     correction = CorrectionTarget(trackId: nil, predicted: nil, thumb: nil, sightingId: nil)
                 }
-                if historyFilter.scope == .all && historyFilter.query.isEmpty {
+                if journalSpecies == nil && historyFilter.scope == .all && historyFilter.query.isEmpty {
                     Button("Alle Sichtungen löschen", role: .destructive) { confirmClear = true }
                         .disabled(sightings.isEmpty)
                 }
@@ -215,6 +255,7 @@ struct SightingsView: View {
 struct GalleryView: View {
     let photos: [PhotoItem]
     let catalog: SpeciesCatalog
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.modelContext) private var context
     @State private var viewer: PhotoItem?
     @State private var exportError: String?
@@ -223,28 +264,56 @@ struct GalleryView: View {
     @ObservedObject private var clipLibrary = ClipLibrary.shared
     var body: some View {
         ScrollView {
-            ClipGrid(library: clipLibrary)
-            if photos.isEmpty { Text("Noch keine Fotos. Bei jeder neuen Sichtung speichert die App einen Schnappschuss.").foregroundStyle(.secondary).padding() }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], spacing: 6) {
-                ForEach(photos) { p in
-                    Button { viewer = p } label: {
-                        ZStack(alignment: .bottomLeading) {
-                            if let d = p.thumb, let ui = UIImage(data: d) { Image(uiImage: ui).resizable().scaledToFill() }
-                            Text(p.species.first ?? (p.kind == "photo" ? "Bild" : "Foto")).font(.caption.bold()).padding(6).shadow(radius: 3)
-                        }.frame(height: 110).clipShape(RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 14) {
+                galleryHeader
+                ClipGrid(library: clipLibrary)
+                Text("Fotos").font(JournalStyle.heading).accessibilityAddTraits(.isHeader)
+                if photos.isEmpty {
+                    Text("Noch keine Fotos. Bei jeder neuen Sichtung speichert die App einen Schnappschuss.")
+                        .font(JournalStyle.body).foregroundStyle(JournalStyle.muted)
+                } else {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: typeSize.isAccessibilitySize ? 1 : 2), spacing: 12) {
+                        ForEach(photos) { photo in
+                            Button { viewer = photo } label: {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    JournalThumbnail(image: photo.thumb.flatMap { UIImage(data: $0) },
+                                                     height: 126, placeholder: "photo")
+                                    Text(photo.species.first ?? (photo.kind == "photo" ? "Bild" : "Foto"))
+                                        .font(JournalStyle.label)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(10)
+                                }
+                                .background(JournalStyle.card)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("gallery-photo-\(photo.id.uuidString)")
+                        }
                     }
-                    .accessibilityIdentifier("gallery-photo-\(p.id.uuidString)")
                 }
-            }.padding(.horizontal)
-            HStack {
-                Button(exporter.isRunning ? "Sichere …" : "Alle in Fotos sichern") {
+                Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. Nashorn-Fotos und andere Fotos innerhalb von 15 Minuten erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.")
+                    .font(JournalStyle.caption).foregroundStyle(JournalStyle.muted)
+            }
+            .padding(.horizontal, 20).padding(.bottom, 12)
+        }
+        .foregroundStyle(JournalStyle.ink)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                PhotoExportStatusView(exporter: exporter)
+                Button {
                     exporter.start(photos: photos, context: context, catalog: catalog)
-                }.disabled(!exporter.canStart || photos.isEmpty)
-                Button("Alle löschen", role: .destructive) { confirmDelete = true }
-                    .disabled(exporter.isRunning || photos.isEmpty)
-            }.buttonStyle(.bordered).padding()
-            PhotoExportStatusView(exporter: exporter).padding(.horizontal).padding(.bottom, 8)
-            Text("Beim Sichern bekommt jedes Bild Datum, Standort und Artnamen als Bildinformation. Nashorn-Fotos und andere Fotos innerhalb von 15 Minuten erhalten einen 10-km-Standort und eine auf die Stunde gerundete Aufnahmezeit.").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(exporter.isRunning ? "Sichere …" : "Alle in Fotos sichern")
+                        JournalIcon(name: "JournalDownload")
+                    }
+                }
+                .buttonStyle(JournalActionStyle())
+                .disabled(!exporter.canStart || photos.isEmpty)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 8)
+            .background(JournalStyle.paper)
         }
         .onAppear { clipLibrary.reload() }
         .sheet(item: $viewer) { p in PhotoViewer(photo: p, photos: photos) }
@@ -258,6 +327,27 @@ struct GalleryView: View {
         } message: { Text("Sichere die Daten vorher in Einstellungen → Daten sichern.") }
         .alert("Aktion fehlgeschlagen", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) { Button("OK") {} } message: { Text(exportError ?? "") }
     }
+
+    private var galleryHeader: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Galerie").font(JournalStyle.title()).accessibilityAddTraits(.isHeader)
+                Text("\(photos.count) \(photos.count == 1 ? "Foto" : "Fotos") · \(clipLibrary.clips.count) \(clipLibrary.clips.count == 1 ? "Video" : "Videos")")
+                    .font(JournalStyle.caption).foregroundStyle(JournalStyle.muted)
+            }
+            Spacer()
+            Menu {
+                Button("Alle Fotos löschen", role: .destructive) { confirmDelete = true }
+                    .disabled(exporter.isRunning || photos.isEmpty)
+            } label: {
+                JournalIcon(name: "JournalMore", size: 19)
+                    .frame(width: 44, height: 44)
+                    .background(JournalStyle.moss, in: Circle())
+            }
+            .accessibilityLabel("Galerieoptionen")
+        }
+    }
+
 }
 
 struct PhotoViewer: View {

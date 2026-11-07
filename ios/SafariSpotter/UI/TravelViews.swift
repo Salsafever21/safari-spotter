@@ -45,64 +45,63 @@ struct TravelSetupView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "binoculars.fill").font(.largeTitle).foregroundStyle(.orange)
-                        Text("Willkommen bei Safari Spotter").font(.title2.bold())
-                        Text("Wähle, wo du bist und wohin du reist. Das Reiseziel hilft bei der Artenbestimmung und zeigt dir Tiere für Boden, Luft und Wasser.")
-                            .foregroundStyle(.secondary)
-                    }.padding(.vertical, 8)
-                }
-                Section("Deine Reise") {
-                    Button { choosing = .origin } label: {
-                        LabeledContent("Ich bin in", value: origin.isEmpty ? "Land wählen" : CountryOptions.name(origin))
-                    }.accessibilityIdentifier("travel-origin")
-                    Button { choosing = .destination } label: {
-                        LabeledContent("Ich reise nach", value: destination.isEmpty ? "Land wählen" : CountryOptions.name(destination))
-                    }.accessibilityIdentifier("travel-destination")
-                    Text("Deine Geräteeinstellung schlägt nur das Ausgangsland vor. Der aktuelle Standort wird hier nicht abgefragt.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if !destination.isEmpty {
-                    Section("Arten am Reiseziel") {
-                        if let profile = catalog.country(destination) {
-                            Text("\(catalog.featuredClasses(for: destination).count) im Modell erkennbare Arten sind in offiziellen Quellen für \(profile.name) belegt.")
-                            ForEach(AnimalHabitat.allCases) { habitat in
-                                Label("\(catalog.featuredClasses(for: destination).filter { catalog.habitats(for: $0.key).contains(habitat) }.count) · \(habitat.rawValue)", systemImage: habitat.symbol)
-                            }
-                            Text("Weitere Arten bleiben erkennbar. Die genaue Auswahl nach Park oder Reservat folgt später.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text("Für dieses Land ist das Artenprofil noch in Vorbereitung. Die allgemeine Erkennung bleibt verfügbar.")
-                                .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if firstLaunch {
+                        HStack(spacing: 10) {
+                            JournalIcon(name: "JournalBinoculars")
+                                .frame(width: 36, height: 36)
+                                .background(JournalStyle.amber, in: RoundedRectangle(cornerRadius: 11))
+                            Text("SAFARI SPOTTER").font(JournalStyle.micro).tracking(1.5)
                         }
+                        hero
                     }
-                }
-                if origin != destination, let profile = catalog.country(origin) {
-                    Section("Arten vor Ort") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(firstLaunch ? "Deine nächste Safari wartet." : "Deine Reise")
+                            .font(JournalStyle.title(38))
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Wähle dein aktuelles Land und dein Reiseziel.")
+                            .font(JournalStyle.body).foregroundStyle(JournalStyle.muted)
+                    }
+                    VStack(spacing: 8) {
+                        countryRow(.origin, label: "Ich bin in", code: origin, icon: "JournalPin")
+                        countryRow(.destination, label: "Ich reise nach", code: destination, icon: "JournalPlane")
+                    }
+                    Label { Text("Die Länderwahl braucht keinen Standortzugriff.") } icon: { JournalIcon(name: "JournalPrivacy") }
+                        .font(JournalStyle.caption).foregroundStyle(JournalStyle.muted)
+                    if !destination.isEmpty { destinationProfile }
+                    if origin != destination, let profile = catalog.country(origin) {
                         Text("Für \(profile.name) sind \(catalog.featuredClasses(for: origin).count) im Modell erkennbare Arten belegt. Auch dieses Land hilft der Erkennung.")
-                            .foregroundStyle(.secondary)
+                            .font(JournalStyle.caption).foregroundStyle(JournalStyle.muted)
                     }
                 }
+                .padding(.horizontal, 20).padding(.vertical, 14)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-            .safeAreaInset(edge: .bottom) {
-                Button(firstLaunch ? "Safari starten" : "Reise speichern") {
+            .background(JournalStyle.paper.ignoresSafeArea())
+            .foregroundStyle(JournalStyle.ink)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button {
                     settings.originCountry = origin
                     settings.destinationCountry = destination
                     settings.onboardingComplete = true
                     if !firstLaunch { dismiss() }
+                } label: {
+                    HStack {
+                        Text(firstLaunch ? "Safari starten" : "Reise speichern")
+                        JournalIcon(name: "JournalArrow")
+                    }
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(JournalActionStyle())
                 .disabled(origin.isEmpty || destination.isEmpty)
                 .accessibilityIdentifier("travel-start")
-                .padding(14)
-                .background(.regularMaterial)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+                .background(JournalStyle.paper)
             }
-            .navigationTitle(firstLaunch ? "Reise einrichten" : "Reise ändern")
+            .navigationTitle(firstLaunch ? "" : "Reise ändern")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(firstLaunch ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 if !firstLaunch {
                     ToolbarItem(placement: .topBarTrailing) { Button("Schliessen") { dismiss() } }
@@ -113,6 +112,67 @@ struct TravelSetupView: View {
                                    title: field == .origin ? "Ausgangsland" : "Reiseziel")
             }
         }
+        .preferredColorScheme(.light)
+        .tint(JournalStyle.forest)
+    }
+
+    private var hero: some View {
+        Color.clear.frame(height: 245)
+            .overlay { Image("JournalZebras").resizable().scaledToFill() }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 5) {
+                    JournalIcon(name: "JournalPin", size: 12).foregroundStyle(JournalStyle.amber)
+                    Text("SÜDAFRIKA").font(JournalStyle.micro).tracking(1)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(JournalStyle.camera, in: Capsule())
+                .padding(14)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .allowsHitTesting(false)
+            .accessibilityLabel("Zebras in Südafrika")
+    }
+
+    private func countryRow(_ field: TravelField, label: String, code: String, icon: String) -> some View {
+        Button { choosing = field } label: {
+            HStack(spacing: 12) {
+                JournalIcon(name: icon).frame(width: 36, height: 36)
+                    .foregroundStyle(JournalStyle.forest)
+                    .background(JournalStyle.moss, in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label).font(JournalStyle.micro).foregroundStyle(JournalStyle.muted)
+                    Text(code.isEmpty ? "Land wählen" : CountryOptions.name(code))
+                        .font(JournalStyle.bold)
+                }
+                Spacer(minLength: 6)
+                JournalIcon(name: "JournalChevron", size: 12).foregroundStyle(JournalStyle.muted)
+            }
+            .padding(12)
+            .frame(minHeight: 60)
+            .background(JournalStyle.card, in: RoundedRectangle(cornerRadius: 15))
+            .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(JournalStyle.line) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("travel-\(field.rawValue)")
+    }
+
+    private var destinationProfile: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Arten am Reiseziel").font(JournalStyle.heading)
+            if let profile = catalog.country(destination) {
+                let classes = catalog.featuredClasses(for: destination)
+                Text("\(classes.count) im Modell erkennbare Arten sind in offiziellen Quellen für \(profile.name) belegt.")
+                ForEach(AnimalHabitat.allCases) { habitat in
+                    Label("\(classes.filter { catalog.habitats(for: $0.key).contains(habitat) }.count) · \(habitat.rawValue)", systemImage: habitat.symbol)
+                }
+            } else {
+                Text("Für dieses Land ist das Artenprofil noch in Vorbereitung. Die allgemeine Erkennung bleibt verfügbar.")
+            }
+        }
+        .font(JournalStyle.caption).foregroundStyle(JournalStyle.muted)
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(JournalStyle.moss, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

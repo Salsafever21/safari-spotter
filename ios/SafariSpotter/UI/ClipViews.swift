@@ -11,34 +11,44 @@ struct ClipGrid: View {
                 Text(error).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("clip-load-error")
                 Button("Videos erneut laden") { library.reload() }.buttonStyle(.bordered)
                     .accessibilityIdentifier("clip-reload")
-            }.frame(maxWidth: .infinity, alignment: .leading).padding()
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
         if let error = library.recoveryError {
-            Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal)
+            Text(error).font(.caption).foregroundStyle(.orange)
         }
         if !library.clips.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Videos \(library.clips.count)").font(.headline).padding(.horizontal)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Videos").font(JournalStyle.heading).accessibilityAddTraits(.isHeader)
+                LazyVStack(spacing: 10) {
                     ForEach(library.clips) { clip in
                         Button { playing = clip } label: {
-                            ZStack(alignment: .bottomLeading) {
-                                if let ui = library.thumbnail(clip) { Image(uiImage: ui).resizable().scaledToFill() }
-                                else { Rectangle().fill(.quaternary) }
-                                HStack(spacing: 4) {
-                                    Image(systemName: clip.isPlayable ? "video.fill" : "exclamationmark.triangle.fill")
-                                    Text(clip.isPlayable ? VideoGeometry.timerText(clip.duration) : "beschädigt")
+                            JournalThumbnail(image: library.thumbnail(clip), height: 154, placeholder: "video")
+                                .overlay {
+                                    if clip.isPlayable {
+                                        JournalIcon(name: "JournalPlay", size: 18)
+                                            .frame(width: 44, height: 44)
+                                            .background(JournalStyle.camera, in: Circle())
+                                    }
                                 }
-                                .font(.caption.bold()).padding(6).shadow(radius: 3)
-                            }
-                            .frame(height: 110).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(alignment: .bottom) {
+                                    HStack(alignment: .bottom, spacing: 8) {
+                                        Text(clip.species.first ?? "Video").font(JournalStyle.bold)
+                                        Spacer()
+                                        Text(clip.isPlayable ? VideoGeometry.timerText(clip.duration) : "Beschädigt")
+                                            .font(JournalStyle.label)
+                                    }
+                                    .padding(12)
+                                    .background(LinearGradient(colors: [.clear, .black.opacity(0.84)], startPoint: .top, endPoint: .bottom))
+                                }
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .accessibilityLabel("Video \(fmtDate(clip.createdAt)) \(fmtTime(clip.createdAt)), \(VideoGeometry.timerText(clip.duration))")
                     }
                 }
-                .padding(.horizontal)
             }
-            .padding(.bottom, 8)
             .sheet(item: $playing) { clip in ClipPlayerView(clip: clip, library: library) }
         }
     }

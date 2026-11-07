@@ -22,7 +22,17 @@ struct LiveView: View {
 
     var body: some View {
         ZStack {
+            JournalStyle.camera.ignoresSafeArea()
             CameraPreview(session: camera.session).ignoresSafeArea()
+            VStack(spacing: 0) {
+                LinearGradient(colors: [JournalStyle.camera.opacity(0.78), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 155)
+                Spacer(minLength: 0)
+                LinearGradient(colors: [.clear, JournalStyle.camera.opacity(0.92)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 280)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
             OverlayView(camera: camera)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -38,6 +48,7 @@ struct LiveView: View {
             }
             .padding(.horizontal, 14)
         }
+        .preferredColorScheme(.dark)
         .onAppear {
             reconcileSavedDrive()
             camera.attach(context: context); camera.start(); drive.start()
@@ -93,76 +104,145 @@ struct LiveView: View {
     }
 
     private var topBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(camera.status, systemImage: camera.tracking ? "circle.fill" : "circle").pill()
-                Spacer()
-                Button { showGuide = true } label: { Image(systemName: "book.closed") }
-                    .pill().accessibilityLabel("Tierführer für das Reiseziel")
-                if let started = camera.recordingStartedAt { RecordingTimer(startedAt: started) }
-                if camera.tracking { Text("\(Int(camera.fps)) fps").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-            }
-            if let notice = camera.notice { Label(notice, systemImage: "video.badge.checkmark").pill() }
-            if camera.lenses.count > 1 {
-                Menu {
-                    ForEach(camera.lenses) { lens in
-                        Button { camera.selectLens(lens.id) } label: {
-                            if lens.id == camera.selectedLensID { Label(lens.name, systemImage: "checkmark") }
-                            else { Text(lens.name) }
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    if !drive.active { drive.startDrive() }
+                    showDrive = true
+                } label: {
+                    HStack(spacing: 7) {
+                        if drive.active {
+                            Image(systemName: "stop.fill").accessibilityHidden(true)
+                            Text("\(fmtKm(drive.dist)) km · \(fmtDur(Date().timeIntervalSince(drive.startedAt ?? .now)))")
+                        } else {
+                            JournalIcon(name: "JournalPlay")
+                            Text("Game Drive")
                         }
                     }
-                } label: {
-                    Label(camera.lenses.first(where: { $0.id == camera.selectedLensID })?.name ?? "Objektiv",
-                          systemImage: camera.recording ? "lock.fill" : "camera.aperture")
+                    .cameraPill(active: drive.active)
                 }
-                .pill()
-                // Kein Objektivwechsel während Foto- oder Videoaufnahme
-                .disabled(camera.capturingPhoto || camera.recording)
+                .accessibilityLabel(drive.active ? "Laufender Game Drive" : "Game Drive starten")
+                .accessibilityValue(drive.active ? "\(fmtKm(drive.dist)) km · \(fmtDur(Date().timeIntervalSince(drive.startedAt ?? .now)))" : "")
+                Spacer(minLength: 0)
+                Button { camera.setTracking(!camera.tracking) } label: {
+                    HStack(spacing: 7) {
+                        JournalIcon(name: "JournalTrack")
+                        Text(camera.tracking ? "Tracken an" : "Tracken")
+                    }.cameraPill(active: camera.tracking)
+                }
+                .disabled(camera.permission == .denied)
+                .accessibilityValue(camera.status)
+                Button { showGuide = true } label: {
+                    JournalIcon(name: "JournalBook", size: 19)
+                        .frame(width: 44, height: 44)
+                        .foregroundStyle(.white)
+                        .background(JournalStyle.camera, in: Circle())
+                }
+                .accessibilityLabel("Tierführer für das Reiseziel")
             }
-            HStack {
-                Button { if !drive.active { drive.startDrive() }; showDrive = true } label: {
-                    Label(drive.active ? "\(fmtKm(drive.dist)) km · \(fmtDur(Date().timeIntervalSince(drive.startedAt ?? .now)))" : "Game Drive starten", systemImage: drive.active ? "stop.fill" : "play.fill")
-                }.pill(active: drive.active)
-                Spacer()
-                Button { camera.setTracking(!camera.tracking) } label: { Label(camera.tracking ? "Tracking läuft" : "Tracken", systemImage: "scope") }.pill(active: camera.tracking)
-                    .disabled(camera.permission == .denied)
+            if let started = camera.recordingStartedAt { RecordingTimer(startedAt: started) }
+            if let notice = camera.notice {
+                Label(notice, systemImage: "video.badge.checkmark").cameraPill()
+            }
+            if camera.session.isInterrupted {
+                Label("Kamera unterbrochen", systemImage: "video.slash").cameraPill()
             }
             if drive.active && (drive.authorization == .denied || drive.authorization == .restricted) {
-                Button { openAppSettings() } label: { Label("Standort aus: Game Drive zeichnet nichts auf · Einstellungen", systemImage: "location.slash") }.pill()
+                Button { openAppSettings() } label: {
+                    Label("Standort aus: Game Drive zeichnet nichts auf · Einstellungen", systemImage: "location.slash").cameraPill()
+                }
             }
         }
+        .buttonStyle(.plain)
         .padding(.top, 8)
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 10) {
-            ZoomSlider(camera: camera)
-                .pill()
+        VStack(spacing: 14) {
+            if camera.permission == .granted {
+                HStack(spacing: 9) {
+                    ZoomSlider(camera: camera)
+                    if camera.lenses.count > 1 { lensPicker }
+                }
+                .cameraPill()
+                .tint(JournalStyle.amber)
+            }
+            HStack(alignment: .center) {
+                Button { photoAnalysis = true } label: {
+                    captureControl("Analysieren") { JournalIcon(name: "JournalAnalyze", size: 21) }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Bilder analysieren")
+                Button { takePhoto() } label: {
+                    captureControl("Foto", size: 64, background: JournalStyle.paper) {
+                        if camera.capturingPhoto { ProgressView().tint(JournalStyle.ink) }
+                        else { JournalIcon(name: "JournalCamera", size: 23).foregroundStyle(JournalStyle.ink) }
+                    }
+                }
+                .disabled(camera.permission != .granted || camera.capturingPhoto)
+                .frame(maxWidth: .infinity)
+                Button { camera.toggleRecording() } label: {
+                    captureControl("Video", background: camera.recording ? JournalStyle.red : JournalStyle.camera) {
+                        if camera.recordingFinishing || camera.recordingStarting { ProgressView().tint(.white) }
+                        else if camera.recording { Image(systemName: "stop.fill").font(.headline) }
+                        else { JournalIcon(name: "JournalRecord", size: 22).foregroundStyle(JournalStyle.red) }
+                    }
+                }
+                .disabled(camera.permission != .granted || camera.recordingFinishing || camera.recordingStarting)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(camera.recordingStarting ? "Video wird vorbereitet" : camera.recordingFinishing ? "Video wird gespeichert" : camera.recording ? "Videoaufnahme stoppen" : "Videoaufnahme starten")
+            }
             HStack {
                 Button { showSightings = true } label: {
-                    HStack { Text("Sichtungen"); Text("\(sightings.reduce(0) { $0 + $1.n })").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(Color.accentColor, in: Capsule()).foregroundStyle(.black) }
-                }.pill()
-                Spacer()
-                Button { camera.toggleRecording() } label: {
-                    Image(systemName: camera.recordingFinishing || camera.recordingStarting ? "circle.dotted" : camera.recording ? "stop.circle.fill" : "record.circle").font(.title2)
-                        .foregroundStyle(camera.recording ? Color.white : Color.red)
+                    HStack(spacing: 7) {
+                        JournalIcon(name: "JournalStack")
+                        Text("Sichtungen")
+                    }.cameraPill()
                 }
-                .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(camera.recording ? Color.red : Color.black.opacity(0.6), in: Capsule())
-                .disabled(camera.permission != .granted || camera.recordingFinishing || camera.recordingStarting)
-                .accessibilityLabel(camera.recordingStarting ? "Video wird vorbereitet" : camera.recordingFinishing ? "Video wird gespeichert" : camera.recording ? "Videoaufnahme stoppen" : "Videoaufnahme starten")
-                Button { takePhoto() } label: {
-                    Image(systemName: camera.capturingPhoto ? "circle.dotted" : "camera.circle.fill").font(.title2)
+                .accessibilityValue("\(sightings.reduce(0) { $0 + $1.n }) Tiere")
+                Spacer(minLength: 4)
+                Button { showSettings = true } label: {
+                    HStack(spacing: 7) {
+                        JournalIcon(name: "JournalSettings")
+                        Text("Einstellungen")
+                    }.cameraPill()
                 }
-                .pill()
-                .disabled(camera.permission != .granted || camera.capturingPhoto)
-                Button { photoAnalysis = true } label: { Image(systemName: "photo.on.rectangle") }
-                    .pill().accessibilityLabel("Bilder analysieren")
-                Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                    .pill().accessibilityLabel("Einstellungen")
             }
         }
+        .buttonStyle(.plain)
         .padding(.bottom, 10)
+    }
+
+    private var lensPicker: some View {
+        Menu {
+            ForEach(camera.lenses) { lens in
+                Button { camera.selectLens(lens.id) } label: {
+                    if lens.id == camera.selectedLensID { Label(lens.name, systemImage: "checkmark") }
+                    else { Text(lens.name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if camera.recording { Image(systemName: "lock.fill").accessibilityHidden(true) }
+                else { JournalIcon(name: "JournalLens", size: 14) }
+                Text(camera.lenses.first(where: { $0.id == camera.selectedLensID })?.name ?? "Objektiv")
+                    .lineLimit(1)
+            }
+        }
+        .disabled(camera.capturingPhoto || camera.recording)
+    }
+
+    private func captureControl<Icon: View>(_ title: String, size: CGFloat = 48, background: Color = JournalStyle.camera,
+                                            @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: 5) {
+            icon()
+                .frame(width: size, height: size)
+                .background(background, in: Circle())
+                .accessibilityHidden(true)
+            Text(title).font(JournalStyle.micro)
+        }
+        .foregroundStyle(.white)
+        .contentShape(Rectangle())
     }
 
     private func takePhoto() {
@@ -289,18 +369,23 @@ struct RecordingTimer: View {
 struct ZoomSlider: View {
     @ObservedObject var camera: CameraController
     var body: some View {
-        VStack(spacing: 4) {
-            Text(String(format: "%.1f×", camera.zoomFactor).replacingOccurrences(of: ".", with: ",")).font(.caption2.monospacedDigit())
-            Slider(value: Binding(get: { Double(camera.zoomFactor) }, set: { camera.setZoom(CGFloat($0)) }), in: 1...Double(max(camera.maxZoom, 1.01))).frame(width: 120)
+        HStack(spacing: 8) {
+            Text(String(format: "%.1f×", camera.zoomFactor).replacingOccurrences(of: ".", with: ","))
+                .monospacedDigit()
+            Slider(value: Binding(get: { Double(camera.zoomFactor) }, set: { camera.setZoom(CGFloat($0)) }), in: 1...Double(max(camera.maxZoom, 1.01)))
+                .frame(width: 82)
+                .accessibilityLabel("Zoom")
         }
     }
 }
 
-extension View {
-    func pill(active: Bool = false) -> some View {
-        self.font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-            .background(active ? Color.accentColor : Color.black.opacity(0.6), in: Capsule())
-            .foregroundStyle(active ? Color.black : Color.white)
+private extension View {
+    func cameraPill(active: Bool = false) -> some View {
+        self.font(JournalStyle.label)
+            .padding(.horizontal, 13)
+            .frame(minHeight: 44)
+            .background(active ? JournalStyle.amber : JournalStyle.camera, in: Capsule())
+            .foregroundStyle(active ? JournalStyle.ink : Color.white)
     }
 }
 extension Color { init(hex: UInt32) { self.init(red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255, blue: Double(hex & 0xff) / 255) } }
