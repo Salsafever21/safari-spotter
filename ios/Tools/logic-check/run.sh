@@ -17,6 +17,11 @@ sed -e '/^import CoreGraphics/d' "$SRC/Core/Detection/Tracker.swift" > "$WORK/sr
 # DriveStats (bis vor DriveRecorder) und Position
 { sed -n '1,/^\/\/\/ GPS, Region/p' "$SRC/Core/Location/DriveRecorder.swift" | sed -e '/^import CoreLocation/d;/^import Combine/d;/^\/\/\/ GPS, Region/d'
   sed -n '/^\/\/\/ Position einer Sichtung/,$p' "$SRC/Core/Data/Models.swift"; } > "$WORK/src/DriveStats.swift"
+# Foundation liefert auf Linux die Rechteckfunktionen; auf aktuellen macOS-SDKs braucht es CoreGraphics.
+for file in "$WORK"/src/*.swift; do
+  { printf '#if canImport(CoreGraphics)\nimport CoreGraphics\n#endif\n'; cat "$file"; } > "$file.imports"
+  mv "$file.imports" "$file"
+done
 swiftc -O -o "$WORK/check" "$WORK"/src/*.swift
 node "$HERE/mkinput.js" "$WORK/input.json"
 node "$HERE/jsref.js" "$WORK/input.json" "$WORK/js-out.json"

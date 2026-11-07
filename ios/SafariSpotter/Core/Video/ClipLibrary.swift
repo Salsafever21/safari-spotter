@@ -1,0 +1,113 @@
+import Foundation
+import AVFoundation
+import CoreLocation
+import Photos
+import UIKit
+import Combine
+
+/// Liste der gespeicherten Videoclips für Galerie und Teilen. Liest die Dateien aus `ClipFiles` (Application Support/Clips).
+/// Benutzung vom Hauptthread.
+final class ClipLibrary: ObservableObject {
+    static let shared = ClipLibrary()
+
+    @Published private(set) var clips: [ClipRecord] = []
+    @Published private(set) var recoveryError: String?
+    @Published private(set) var loadError: String?
+    private(set) var directory: URL?
+    private var recoveryDone = false
+    private var recoveryInProgress = false
+
+    init(directory: URL? = nil) {
+        self.directory = directory
+        reload()
+    }
+
+    func reload() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.reload() }; return }
+        do {
+            let directory = try resolveDirectory()
+            clips = try ClipFiles.list(in: directory)
+            loadError = nil
+        } catch {
+            loadError = "Videos konnten nicht geladen werden. Die zuletzt geladene Liste bleibt sichtbar. Es wurde nichts gelöscht. \(error.localizedDescription)"
+        }
+    }
+
+    private func resolveDirectory() throws -> URL {
+        if let directory { return directory }
+        let resolved = try ClipFiles.defaultDirectory()
+        directory = resolved
+        return resolved
+    }
+
+    func movieURL(_ clip: ClipRecord) -> URL? { directory.map { ClipFiles.movieURL(clip.id, in: $0) } }
+
+    func thumbnail(_ clip: ClipRecord) -> UIImage? {
+        guard let directory, clip.thumbnail != nil else { return nil }
+        return UIImage(contentsOfFile: ClipFiles.thumbnailURL(clip.id, in: directory).path)
+    }
+
+    /// Nur auf ausdrücklichen Wunsch (Galerie, mit Rückfrage)
+    func delete(_ clip: ClipRecord) throws {
+        let directory = try resolveDirectory()
+        try ClipFiles.delete(clip.id, in: directory)
+        reload()
+    }
+
+    /// Einmal nach dem Start: Aufnahmen, die beim Beenden der App noch liefen, prüfen und als wiederhergestellt markieren
+    @MainActor
+    func recoverInterrupted(excluding active: UUID?) async {
+        guard !recoveryDone, !recoveryInProgress else { return }
+        recoveryInProgress = true
+        defer { recoveryInProgress = false }
+        let directory: URL
+        do { directory = try resolveDirectory() }
+        catch {
+            recoveryError = "Videoaufnahmen konnten nicht geprüft werden. Die Dateien bleiben erhalten. \(error.localizedDescription)"
+            reload()
+            return
+        }
+        let report = await ClipFiles.recoverInterrupted(in: directory, excluding: active, probe: Self.probe)
+        guard !Task.isCancelled else { return }
+        recoveryDone = report.directoryError == nil && report.failedIDs.isEmpty
+        if let error = report.directoryError {
+            recoveryError = "Videoaufnahmen konnten nicht geprüft werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht. \(error)"
+        } else {
+            recoveryError = report.failedIDs.isEmpty ? nil : "\(report.failedIDs.count) Videoaufnahme(n) konnten nicht wiederhergestellt werden. Die Dateien bleiben erhalten; beim nächsten Start wird es erneut versucht."
+        }
+        reload()
+    }
+
+    static func probe(_ url: URL) async -> ClipProbe? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration), duration.isNumeric,
+              let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let size = try? await track.load(.naturalSize) else { return nil }
+        return ClipProbe(duration: duration.seconds, width: Int(size.width), height: Int(size.height))
+    }
+}
+
+/// Video in die Fotos-Mediathek. Die Datei geht unverändert mit (ohne Standort-Metadaten); als Ort bekommt der Eintrag
+/// höchstens die vergröberte 10-km-Position aus der Clip-Datei, nie eine genaue.
+enum VideoExporter {
+    enum ExportError: LocalizedError {
+        case notPlayable
+        var errorDescription: String? { "Dieses Video ist beschädigt und kann nicht gesichert werden." }
+    }
+
+    static func saveToPhotos(_ clip: ClipRecord, url: URL) async throws {
+        guard clip.isPlayable else { throw ExportError.notPlayable }
+        guard await PhotoExporter.requestAddAccess() else { throw PhotoExporter.ExportError.denied }
+        var coarseLocation: CLLocation?
+        if clip.coarse, let lat = clip.lat, let lon = clip.lon { coarseLocation = CLLocation(latitude: lat, longitude: lon) }
+        let location = coarseLocation, created = clip.createdAt
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            let options = PHAssetResourceCreationOptions()
+            options.shouldMoveFile = false   // der Clip bleibt in der App
+            request.addResource(with: .video, fileURL: url, options: options)
+            request.creationDate = created
+            request.location = location
+        }
+    }
+}

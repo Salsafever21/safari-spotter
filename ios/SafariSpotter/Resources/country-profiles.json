@@ -1,0 +1,55 @@
+{
+  "_comment": "Beispiele offiziell dokumentierter Arten in Schutzgebieten des Landes. Keine vollständige Artenliste, keine Aussage über jeden Park. Die Artengewichte bleiben weich.",
+  "profiles": [
+    {
+      "code": "ZA", "name": "Südafrika",
+      "featured": ["elefant", "breitmaulnashorn", "spitzmaulnashorn", "flusspferd", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "wildhund", "tuepfelhyaene", "impala", "kudu", "nyala", "buschbock", "wasserbock", "streifengnu", "warzenschwein", "nilkrokodil", "brillenpinguin", "seebaer", "hornrabe", "riesentrappe", "gaukler", "schreiseeadler", "sattelstorch", "marabu"],
+      "sources": ["https://www.sanparks.org/parks/kruger/explore/fauna-flora/mammals", "https://www.sanparks.org/parks/kruger/explore/fauna-flora/mammals/checklist", "https://www.sanparks.org/parks/kruger/explore/fauna-flora/birds", "https://www.sanparks.org/parks/table-mountain/what-to-do/attractions/boulders-penguin-colony", "https://www.sanparks.org/parks/addo-elephant/"]
+    },
+    {
+      "code": "NA", "name": "Namibia",
+      "featured": ["elefant", "spitzmaulnashorn", "breitmaulnashorn", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "tuepfelhyaene", "springbock", "oryx", "elenantilope", "streifengnu", "impala", "flamingo", "seebaer"],
+      "sources": ["https://www.meft.gov.na/national-parks/etosha-national-park/217/", "https://meft.gov.na/national-parks/skeleton-coast-park/227"]
+    },
+    {
+      "code": "BW", "name": "Botswana",
+      "featured": ["elefant", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "serval", "karakal", "tuepfelhyaene", "schabrackenschakal", "impala", "kudu", "streifengnu", "wasserbock", "flusspferd", "nilkrokodil", "nilwaran", "schreiseeadler", "nilgans", "gabelracke"],
+      "sources": ["https://botswanatourism.co.bw/explore/chobe-national-park", "https://botswanatourism.co.bw/index.php/explore/savuti-and-linyanti"]
+    },
+    {
+      "code": "ZW", "name": "Simbabwe",
+      "featured": ["elefant", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "wildhund", "kudu", "rappenantilope", "flusspferd", "nilkrokodil", "hornrabe", "gelbschnabeltoko", "gabelracke"],
+      "sources": ["https://www.zimparks.org.zw/hwange-national-park/", "https://www.zimparks.org.zw/wp-content/uploads/2024/07/Hwange-GMP.pdf", "https://www.zimparks.org.zw/wp-content/uploads/2024/07/Hwange-Annexes.pdf", "https://www.zimparks.org.zw/mana-pools-national-park/"]
+    },
+    {
+      "code": "ZM", "name": "Sambia",
+      "featured": ["elefant", "flusspferd", "nilkrokodil", "loewe_m", "loewin", "gepard", "wildhund", "impala", "wasserbock", "kaffernbueffel", "schreiseeadler", "hornrabe"],
+      "sources": ["https://www.zambiatourism.com/destinations/national-parks/kafue-national-park/", "https://www.zambiatourism.com/destinations/national-parks/busanga-plains/"]
+    },
+    {
+      "code": "MZ", "name": "Mosambik",
+      "featured": ["elefant", "kaffernbueffel", "flusspferd", "nilkrokodil", "steppenzebra", "streifengnu", "loewe_m", "loewin", "leopard", "impala", "kudu", "buschbock", "tuepfelhyaene", "schreiseeadler", "marabu"],
+      "sources": ["https://www.anac.gov.mz/en/parques/gorongosa/", "https://www.anac.gov.mz/en/parques/zinave/", "https://gorongosa.org/birds/", "https://gorongosa.org/ecological-monitoring-2/"]
+    },
+    {
+      "code": "TZ", "name": "Tansania",
+      "featured": ["elefant", "spitzmaulnashorn", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "gepard", "tuepfelhyaene", "streifengnu", "strauss", "flamingo", "nilkrokodil"],
+      "sources": ["https://tanzaniaparks.go.tz/serengeti/wildlife", "https://tanzaniaparks.go.tz/serengeti/attractions"]
+    },
+    {
+      "code": "KE", "name": "Kenia",
+      "featured": ["elefant", "spitzmaulnashorn", "breitmaulnashorn", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "leopard", "strauss", "flusspferd", "nilkrokodil", "sekretaer", "schreiseeadler", "sattelstorch"],
+      "sources": ["https://kws.go.ke/meru-national-park-kenyas-wilderness-is-rising-again/", "https://www.kws.go.ke/sites/default/files/2023-10/Park%20Magazine%2007082023%20small.pdf", "https://www.kws.go.ke/sites/default/files/2019-11/The%20Status%20of%20Wildlife%20Report%202015%20to%202017_0.pdf", "https://kws.go.ke/princess-takamado-visits-nairobi-national-park-for-wildlife-and-birding-experience/"]
+    },
+    {
+      "code": "UG", "name": "Uganda",
+      "featured": ["elefant", "kaffernbueffel", "flusspferd", "giraffe", "steppenzebra", "loewe_m", "loewin", "schreiseeadler", "marabu", "nilgans"],
+      "sources": ["https://ugandawildlife.org/wp-content/uploads/2026/04/State-of-Wildlife-Resources-in-Uganda-2026-Book-final-1-1.pdf", "https://ugandawildlife.org/animals/zebra/", "https://ugandawildlife.org/wp-content/uploads/2024/10/Final-UWA-QUEEN-ELIZ.-NP-ENVIRONMENTAL-PROJECT-BRIEF-disclose.pdf"]
+    },
+    {
+      "code": "RW", "name": "Ruanda",
+      "featured": ["elefant", "spitzmaulnashorn", "breitmaulnashorn", "kaffernbueffel", "giraffe", "steppenzebra", "loewe_m", "loewin", "flusspferd", "nilkrokodil", "impala", "wasserbock", "warzenschwein", "schreiseeadler"],
+      "sources": ["https://www.africanparks.org/the-parks/akagera", "https://www.africanparks.org/newsroom/press-releases/aerial-census-confirms-almost-8000-large-mammals-akagera-national-park-rwanda", "https://www.africanparks.org/ceo-report/september-2017", "https://www.africanparks.org/newsroom/press-releases/ruzizi-tented-lodge-opens-public"]
+    }
+  ]
+}

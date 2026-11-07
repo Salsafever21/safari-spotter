@@ -1,16 +1,39 @@
 // Trainiert den Artenkopf auf den MobileNet-Embeddings und exportiert ihn als TF.js-Layers-Modell in ../models/head/.
-// Aufruf: node train.js [embeddings.json]
+// Aufruf: HEAD_VERSION=1.2.2-candidate node train.js [embeddings.json]
 const fs = require('fs');
 const path = require('path');
 const tf = require('@tensorflow/tfjs-node');
+const { isValidation, eligibleFiles, sourceFingerprint } = require('./dataset');
 
 const SITE = path.resolve(__dirname, '..');
 const EMB = path.resolve(process.argv[2] || path.join(__dirname, 'embeddings.json'));
 const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'species.json'), 'utf8'));
 const classes = spec.classes.map((c) => c.key);
 const idx = Object.fromEntries(classes.map((k, i) => [k, i]));
+const HEAD_VERSION = process.env.HEAD_VERSION;
+if (!HEAD_VERSION || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(HEAD_VERSION)) {
+  throw new Error('HEAD_VERSION für einen neuen Modellkandidaten setzen, z. B. HEAD_VERSION=1.2.2-candidate');
+}
+const outDir = path.join(SITE, 'models', 'head', HEAD_VERSION);
+if (fs.existsSync(outDir)) throw new Error('Modellversion existiert bereits und wird nicht überschrieben: ' + outDir);
 
 const raw = JSON.parse(fs.readFileSync(EMB, 'utf8'));
+if (!raw.sources || typeof raw.sources !== 'object') {
+  throw new Error('Embeddings ohne Quellen-Prüfsummen: ./node22.sh embed.js erneut ausführen');
+}
+const dataDir = path.join(__dirname, 'data');
+const manifest = JSON.parse(fs.readFileSync(path.join(dataDir, 'manifest.json'), 'utf8'));
+const currentFiles = spec.classes.flatMap((c) => eligibleFiles(path.join(dataDir, c.key), c.key, manifest)
+  .map((file) => c.key + '/' + file)).sort();
+if (JSON.stringify(currentFiles) !== JSON.stringify(Object.keys(raw.sources).sort())) {
+  throw new Error('Trainingsfotos oder Freigaben haben sich geändert: ./node22.sh embed.js erneut ausführen');
+}
+for (const relative of currentFiles) {
+  const actual = sourceFingerprint(fs.readFileSync(path.join(dataDir, relative)), manifest[relative]);
+  if (JSON.stringify(actual) !== JSON.stringify(raw.sources[relative])) {
+    throw new Error('Foto oder Metadaten seit Embedding verändert: ' + relative);
+  }
+}
 const dim = raw.dim;
 const buf = fs.readFileSync(path.join(path.dirname(EMB), raw.bin));
 const all = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
@@ -18,11 +41,17 @@ const items = raw.items;
 if (all.length !== items.length * dim) throw new Error('Embedding-Datei passt nicht zum Index: ' + all.length + ' vs ' + items.length * dim);
 
 // Split nach Beobachtung (alle Varianten eines Fotos landen auf derselben Seite), 15 % Validierung
-function hash(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
 const trainIdx = [], valIdx = [];
-items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (hash(it.file) < 0.15 ? valIdx : trainIdx).push(i); });
+items.forEach((it, i) => { if (idx[it.cls] === undefined) return; (isValidation(it.obs, it.file) ? valIdx : trainIdx).push(i); });
 // Validierung nur mit der ungespiegelten Vollbild-Variante (Variante 0), damit die Zahl realistisch bleibt
 const valIdx0 = valIdx.filter((i) => items[i].variant === 0);
+for (const c of classes) {
+  const trainPhotos = trainIdx.filter((i) => items[i].cls === c && items[i].variant === 0).length;
+  const valPhotos = valIdx0.filter((i) => items[i].cls === c).length;
+  if (trainPhotos < 20 || valPhotos < 3) {
+    throw new Error(`Zu wenig Bilder für ${c}: ${trainPhotos} Train, ${valPhotos} Val (mindestens 20/3)`);
+  }
+}
 
 function tensors(ids) {
   const x = new Float32Array(ids.length * dim); const y = new Int32Array(ids.length);
@@ -49,7 +78,7 @@ model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy
 
 (async () => {
   console.log('Klassen:', classes.length, '| Training:', trainIdx.length, 'Vektoren | Validierung:', valIdx0.length, 'Fotos');
-  let best = 0, bestWeights = null, patience = 0;
+  let best = -1, bestWeights = null, patience = 0;
   for (let epoch = 0; epoch < 60; epoch++) {
     const h = await model.fit(tr.x, yTr, { epochs: 1, batchSize: 128, shuffle: true, classWeight, verbose: 0 });
     const ev = model.evaluate(va.x, yVa, { batchSize: 512 });
@@ -91,8 +120,6 @@ model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy
   Object.entries(conf).sort((a, b) => b[1] - a[1]).slice(0, 15).forEach(([k, n]) => console.log('  ', k, n));
 
   // Export
-  const HEAD_VERSION = process.env.HEAD_VERSION || '1.2.1';
-  const outDir = path.join(SITE, 'models', 'head', HEAD_VERSION);
   fs.mkdirSync(outDir, { recursive: true });
   await model.save('file://' + outDir);
   const meta = {
@@ -102,6 +129,6 @@ model.compile({ optimizer: tf.train.adam(CFG.lr), loss: 'categoricalCrossentropy
   };
   fs.writeFileSync(path.join(outDir, 'classes.json'), JSON.stringify(meta));
   const acc = {}; Object.entries(perClass).forEach(([c, v]) => { acc[c] = v.n ? Math.round(v.ok / v.n * 100) : null; });
-  fs.writeFileSync(path.join(__dirname, 'report.json'), JSON.stringify({ top1: meta.valTop1, top3: Math.round(top3 / p.length * 1000) / 10, perClass: acc, confusions: conf }, null, 1));
+  fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify({ top1: meta.valTop1, top3: Math.round(top3 / p.length * 1000) / 10, perClass: acc, confusions: conf }, null, 1));
   console.log('exportiert nach', outDir);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -8,12 +8,12 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    SWIFT_VERSION: "5.10"
+    SWIFT_VERSION: "5.0"   # Xcode akzeptiert nur 4.0, 4.2, 5.0, 6.0 (Sprachmodus, nicht Compilerversion)
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""   # eigene Team-ID eintragen oder in Xcode unter Signing wählen
+    CURRENT_PROJECT_VERSION: "9"
+    DEVELOPMENT_TEAM: PH2JE4682T
     TARGETED_DEVICE_FAMILY: "1"
-    SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait"
     COREML_CODEGEN_LANGUAGE: Swift
 targets:
   SafariSpotter:
@@ -21,15 +21,29 @@ targets:
     platform: iOS
     sources:
       - path: SafariSpotter
-      # Alle Core-ML-Modelle (auch ein späteres SafariSpotterYolo.mlpackage, siehe training/yolo/README.md); Xcode erzeugt die Swift-Klassen
-      - path: Models
+      # Core-ML-Modelle einzeln als Dateireferenz (ein .mlpackage ist ein Ordner und darf nicht aufgeklappt werden);
+      # Xcode kompiliert sie in der Sources-Phase und erzeugt die Swift-Klassen SafariSpotterDetector / SafariSpotterSpecies.
+      # Optionaler geprüfter Ein-Modell-Detektor (YOLO oder Apple Create ML): erst wenn die Datei existiert,
+      # hier die passende Zeile für SafariSpotterYolo.mlpackage oder SafariSpotterYolo.mlmodel eintragen, z. B.
+      #   - { path: Models/SafariSpotterYolo.mlmodel, type: file, buildPhase: sources }
+      # eintragen; eine Referenz auf eine fehlende Datei würde den Build abbrechen.
+      - path: Models/SafariSpotterDetector.mlmodel
+        type: file
         buildPhase: sources
-        excludes: ["*.json"]
+      - path: Models/SafariSpotterSpecies.mlpackage
+        type: file
+        buildPhase: sources
+    scheme:
+      testTargets: [SafariSpotterTests, SafariSpotterUITests]
     info:
       path: SafariSpotter/Info.plist
       properties:
         CFBundleDisplayName: Safari Spotter
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIBackgroundModes: [location]
         NSCameraUsageDescription: Die Kamera erkennt Tiere live im Bild.
         NSMicrophoneUsageDescription: Für den Ton in Videoaufnahmen.
@@ -41,4 +55,29 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+  # Unit-Tests (Bildausschnitte, Artenschutz, Korrektur): im Simulator mit
+  #   xcodebuild -scheme SafariSpotter -destination 'platform=iOS Simulator,name=iPhone 16' test
+  SafariSpotterTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SafariSpotterTests
+    dependencies:
+      - target: SafariSpotter
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter.tests
+  SafariSpotterUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SafariSpotterUITests
+    dependencies:
+      - target: SafariSpotter
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ch.solution21.safarispotter.uitests

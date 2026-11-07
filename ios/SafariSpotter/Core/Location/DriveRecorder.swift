@@ -63,12 +63,25 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     @Published var points: [TrackPoint] = []
     @Published var dist = 0.0
     @Published var authorization: CLAuthorizationStatus = .notDetermined
+    @Published private(set) var persistenceError: String?
 
     private let manager = CLLocationManager()
     private let catalog = SpeciesCatalog.shared
+    private let stateURL: URL
 
     override init() {
+        stateURL = DriveRecorder.defaultStateURL
         super.init()
+        configure()
+    }
+
+    init(stateURL: URL) {
+        self.stateURL = stateURL
+        super.init()
+        configure()
+    }
+
+    private func configure() {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 5
@@ -78,52 +91,89 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func start() {
+        guard AppSettings.shared.gps else { stop(); return }
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
     }
-    func stop() { manager.stopUpdatingLocation() }
+    func stop() {
+        manager.stopUpdatingLocation()
+        lastFix = nil
+        autoRegion = nil
+    }
 
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
         authorization = m.authorizationStatus
+        guard AppSettings.shared.gps else { stop(); return }
         if authorization == .authorizedWhenInUse || authorization == .authorizedAlways { m.startUpdatingLocation() }
     }
 
     func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let loc = locations.last, loc.horizontalAccuracy >= 0 else { return }
-        lastFix = loc
-        let r = catalog.region(for: loc.coordinate)
-        if r?.key != autoRegion?.key { autoRegion = r }
-        if active { addPoint(loc) }
+        guard AppSettings.shared.gps else { return }
+        let valid = locations.filter { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }
+            .sorted { $0.timestamp < $1.timestamp }
+        guard let newest = valid.last else { return }
+        if active {
+            let previousTime = points.last?.t
+            for loc in valid { addPoint(loc) }
+            if points.last?.t != previousTime { persist() }
+        }
+        if let lastFix, newest.timestamp < lastFix.timestamp { return }
+        lastFix = newest
+        let region = catalog.region(for: newest.coordinate)
+        if region?.key != autoRegion?.key { autoRegion = region }
     }
 
     /// Region für das Vorwissen (Einstellung "auto" | "none" | key)
     func currentRegion(setting: String) -> Region? {
         if setting == "none" { return nil }
-        if setting == "auto" { return autoRegion }
+        if setting == "auto" { return AppSettings.shared.gps ? autoRegion : nil }
         return catalog.regions.first { $0.key == setting }
+    }
+
+    func currentPosition(sensitive: Bool) -> Position? {
+        guard AppSettings.shared.gps, let lastFix,
+              abs(Date().timeIntervalSince(lastFix.timestamp)) < 180 else { return nil }
+        return Position.from(lastFix, sensitive: sensitive)
     }
 
     // MARK: Game Drive
 
     func startDrive() {
+        AppSettings.shared.gps = true
         active = true; startedAt = .now; points = []; dist = 0
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         start(); persist()
     }
 
-    /// Beendet den Drive und gibt den fertigen Datensatz zurück (der Aufrufer speichert ihn in SwiftData)
-    func stopDrive(sightingsCount: Int) -> Drive? {
+    /// Erst einen Datensatz vorbereiten; die laufende Route bleibt erhalten, bis SwiftData ihn bestätigt hat.
+    func preparedDrive(sightingsCount: Int) throws -> Drive? {
         guard active, let s = startedAt else { return nil }
-        let d = Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+        return try Drive(startedAt: s, endedAt: .now, dist: dist, points: points, sightings: sightingsCount)
+    }
+
+    /// Ein erfolgreich gespeicherter Drive gewinnt gegen eine veraltete aktive JSON-Datei.
+    /// Das kann nach einem Fehler beim letzten atomaren Schreiben auftreten.
+    func reconcileCompletedDrive(startedAt completedStart: Date) {
+        guard active, let start = startedAt,
+              abs(start.timeIntervalSince(completedStart)) < 0.001 else { return }
+        finishDrive()
+    }
+
+    func finishDrive() {
+        guard active else { return }
         active = false; startedAt = nil; points = []; dist = 0
         manager.allowsBackgroundLocationUpdates = false
         persist()
-        return d
     }
+
+    /// Sichert auch die letzten GPS-Punkte, bevor iOS die App im Hintergrund anhält.
+    func checkpoint() { if active { persist() } }
 
     private func addPoint(_ loc: CLLocation) {
         let t = loc.timestamp.timeIntervalSince1970
+        guard let startedAt, t >= startedAt.timeIntervalSince1970,
+              points.last.map({ t > $0.t }) ?? true else { return }
         if let last = points.last {
             let d = CLLocation(latitude: last.lat, longitude: last.lon).distance(from: loc)
             if d < 10 && t - last.t < 15 { return }
@@ -132,7 +182,6 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
         points.append(TrackPoint(t: t, lat: (loc.coordinate.latitude * 1e5).rounded() / 1e5, lon: (loc.coordinate.longitude * 1e5).rounded() / 1e5,
                                  spd: loc.speed >= 0 ? (loc.speed * 10).rounded() / 10 : -1, alt: loc.verticalAccuracy >= 0 ? loc.altitude.rounded() : nil))
         if points.count > 20000 { points.removeFirst(points.count - 20000) }
-        if points.count % 5 == 0 { persist() }
     }
 
     func stats(sightings: [Sighting]) -> DriveStats? {
@@ -141,16 +190,32 @@ final class DriveRecorder: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     // Laufender Drive übersteht einen App-Neustart (ss.trip)
-    private var stateURL: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("drive-state.json") }
+    private static var defaultStateURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("drive-state.json")
+    }
     private struct State: Codable { var active: Bool; var startedAt: Date?; var points: [TrackPoint]; var dist: Double }
     private func persist() {
-        try? FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(State(active: active, startedAt: startedAt, points: points, dist: dist)).write(to: stateURL)
+        do {
+            try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(State(active: active, startedAt: startedAt, points: points, dist: dist))
+                .write(to: stateURL, options: .atomic)
+            persistenceError = nil
+        } catch {
+            persistenceError = "Game Drive konnte nicht zwischengespeichert werden: \(error.localizedDescription)"
+        }
     }
     private func restore() {
-        guard let data = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode(State.self, from: data), s.active else { return }
-        active = true; startedAt = s.startedAt; points = s.points; dist = s.dist
-        manager.allowsBackgroundLocationUpdates = true
-        start()
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
+        do {
+            let s = try JSONDecoder().decode(State.self, from: Data(contentsOf: stateURL))
+            guard s.active else { return }
+            guard let startDate = s.startedAt else { throw CocoaError(.fileReadCorruptFile) }
+            active = true; startedAt = startDate; points = s.points; dist = s.dist
+            manager.allowsBackgroundLocationUpdates = true
+            start()
+        } catch {
+            persistenceError = "Letzter Game Drive konnte nicht wiederhergestellt werden: \(error.localizedDescription)"
+        }
     }
 }

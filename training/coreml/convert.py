@@ -181,28 +181,23 @@ def main():
     nms.coordinatesInputFeatureName = 'raw_coordinates'
     nms.confidenceOutputFeatureName = 'confidence'
     nms.coordinatesOutputFeatureName = 'coordinates'
-    nms.iouThresholdInputFeatureName = 'iouThreshold'
-    nms.confidenceThresholdInputFeatureName = 'confidenceThreshold'
+    # Schwellen fest verdrahtet, ohne Eingaben: Core ML lehnt optionale Eingaben am NMS-Modell ab (coremlc: "Features cannot
+    # be optional to this type of model"), und Vision braucht so nur das Bild. Score-Schwelle = Untergrenze von
+    # minScore = max(0.12, Schwelle × 0.4); den eigentlichen Filter macht VisionPipeline.detect wie detectRegion() im Web.
     nms.iouThreshold = 0.5
-    nms.confidenceThreshold = 0.25
+    nms.confidenceThreshold = 0.12
     nms.pickTop.perClass = False  # wie im Web: klassenunabhängig auf den Höchstwert
     nms.stringClassLabels.vector.extend(coco_labels())
-    for name in ('iouThreshold', 'confidenceThreshold'):
-        inp = nms_spec.description.input.add(); inp.name = name; inp.type.doubleType.MergeFromString(b''); inp.type.isOptional = True
     nms_model = ct.models.MLModel(nms_spec)
 
     from coremltools.models import datatypes
     from coremltools.models.pipeline import Pipeline
-    pipeline = Pipeline(input_features=[('image', datatypes.Array(3, 300, 300)), ('iouThreshold', datatypes.Double()), ('confidenceThreshold', datatypes.Double())], output_features=['confidence', 'coordinates'])
+    pipeline = Pipeline(input_features=[('image', datatypes.Array(3, 300, 300))], output_features=['confidence', 'coordinates'])
     pipeline.spec.description.input[0].ParseFromString(spec.description.input[0].SerializeToString())
     pipeline.add_model(det_core)
     pipeline.add_model(nms_model)
     pipeline.spec.description.output[0].ParseFromString(nms_spec.description.output[0].SerializeToString())
     pipeline.spec.description.output[1].ParseFromString(nms_spec.description.output[1].SerializeToString())
-    pipeline.spec.description.input[1].shortDescription = '(optional) IoU-Schwelle, Standard 0.5'
-    pipeline.spec.description.input[2].shortDescription = '(optional) Score-Schwelle, Standard 0.25'
-    pipeline.spec.description.input[1].type.isOptional = True
-    pipeline.spec.description.input[2].type.isOptional = True
     pipeline.spec.description.output[0].shortDescription = 'Scores je Rahmen (COCO-Klassen)'
     pipeline.spec.description.output[1].shortDescription = 'Rahmen (x, y, Breite, Höhe) normiert, Ursprung oben links'
     pipeline.spec.description.metadata.shortDescription = 'Safari Spotter Detektor: SSDLite MobileNetV2 (COCO) mit NMS, Vision-kompatibel (VNRecognizedObjectObservation)'
