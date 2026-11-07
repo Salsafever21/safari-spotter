@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"   # Xcode akzeptiert nur 4.0, 4.2, 5.0, 6.0 (Sprachmodus, nicht Compilerversion)
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "10"
+    CURRENT_PROJECT_VERSION: "11"
     DEVELOPMENT_TEAM: PH2JE4682T
     TARGETED_DEVICE_FAMILY: "1"
     SUPPORTED_INTERFACE_ORIENTATIONS: "UIInterfaceOrientationPortrait"
@@ -33,6 +33,10 @@ targets:
       - path: Models/SafariSpotterSpecies.mlpackage
         type: file
         buildPhase: sources
+    entitlements:
+      path: SafariSpotter/SafariSpotter.entitlements
+      properties:
+        com.apple.developer.applesignin: [Default]
     scheme:
       testTargets: [SafariSpotterTests, SafariSpotterUITests]
     info:

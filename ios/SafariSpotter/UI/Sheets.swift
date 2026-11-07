@@ -156,7 +156,9 @@ struct DriveLiveView: View {
 struct SettingsView: View {
     @ObservedObject var camera: CameraController
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var account: AppleAccountSession
     @EnvironmentObject private var catalog: SpeciesCatalog
     @EnvironmentObject private var drive: DriveRecorder
     @State private var choosingBackup = false
@@ -181,6 +183,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Konto") {
+                    NavigationLink {
+                        AccountView()
+                    } label: {
+                        LabeledContent("Konto", value: account.profile?.displayName ?? (account.profile == nil ? "Optional anmelden" : "Mit Apple angemeldet"))
+                    }
+                    .accessibilityIdentifier("open-account")
+                }
                 Section("Reise") {
                     Button("Länder auswählen") { changeTrip = true }
                     Text("Reiseziel: \(settings.destinationCountry.isEmpty ? "nicht gewählt" : catalog.country(settings.destinationCountry)?.name ?? settings.destinationCountry)")
@@ -279,6 +289,13 @@ struct SettingsView: View {
                 }
                 Section { Text("Safari Spotter iOS · Artenmodell v\(catalog.modelVersion) · \(catalog.shownClasses.count) Arten").font(.caption).foregroundStyle(.secondary) }
             }.navigationTitle("Einstellungen")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Fertig") { dismiss() }
+                            .disabled(backupBusy)
+                            .accessibilityIdentifier("close-settings")
+                    }
+                }
                 .sheet(isPresented: $changeTrip) { TravelSetupView(firstLaunch: false) }
                 .interactiveDismissDisabled(backupBusy)
                 .onAppear {

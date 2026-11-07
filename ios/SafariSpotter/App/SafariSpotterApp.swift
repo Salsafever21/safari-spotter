@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AuthenticationServices
 
 @main
 struct SafariSpotterApp: App {
@@ -9,6 +10,8 @@ struct SafariSpotterApp: App {
     @StateObject private var catalog = SpeciesCatalog.shared
     @StateObject private var drive = DriveRecorder.shared
     @StateObject private var settings = AppSettings.shared
+    @StateObject private var account = AppleAccountSession()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -22,10 +25,17 @@ struct SafariSpotterApp: App {
                         .environmentObject(catalog)
                         .environmentObject(drive)
                         .environmentObject(settings)
+                        .environmentObject(account)
                         .modelContainer(container)
                 case .failed(let message):
                     StorageFailureView(message: message) { storage = StorageLaunch.open() }
                 }
+            }
+            .task(id: scenePhase) {
+                if scenePhase == .active { await account.refresh() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
+                Task { await account.refresh() }
             }
         }
     }
